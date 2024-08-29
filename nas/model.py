@@ -1,4 +1,4 @@
-import torch, nni
+import nni
 import nni.retiarii.nn.pytorch as nn
 
     

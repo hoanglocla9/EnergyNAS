@@ -1,5 +1,4 @@
-import torch
-from model import *
+from .model import *
 from nni.retiarii import Mutator
 
 

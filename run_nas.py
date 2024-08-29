@@ -1,9 +1,9 @@
 import nni.retiarii.strategy as strategy
 from nni.retiarii.evaluator import FunctionalEvaluator
 from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-from learning_utils import evaluate_model
-from model import CalibrationModelSpace
-from mutator import BlockMutator
+from nas.learning_utils import evaluate_model
+from nas.model import CalibrationModelSpace
+from nas.mutator import BlockMutator
 import logging, argparse, os
 _logger = logging.getLogger(__name__)
 
