@@ -49,14 +49,19 @@ def get_predict_features(config):
             ks = item["ks"][1]
             s = item["strides"][1] if "strides" in item else 1
             if "inputh" not in item:
-                print(item)
-            inputh = item["inputh"]
+                if "input_tensors" in item:
+                    inputh =  item["input_tensors"][0][1] ## should be equal 1 
+                else:
+                    raise Exception(f"Something Wrong with this node: {item}")
+            else:
+                inputh = item["inputh"]
         if op in ["channelshuffle", "split"]:
             [b, inputh, inputw, cin] = item["input_tensors"][0]
 
         if "conv" in op:
             flops, params = get_flops_params(op, inputh, cin, cout, ks, s)
             features = [inputh, cin, cout, ks, s, flops / 2e6, params / 1e6]
+
         elif "fc" in op or "fc-relu" in op:
             cout = item["cout"]
             cin = item["cin"]

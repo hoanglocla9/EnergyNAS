@@ -4,7 +4,7 @@ import os
 import logging
 import jsonlines
 from glob import glob
-from nn_meter.predictor import latency_metrics, list_latency_predictors, load_latency_predictor
+from nn_meter.predictor import latency_metrics, list_latency_predictors, load_predictor
 from nn_meter.utils import download_from_url, get_user_data_folder
 logging = logging.getLogger("nn-Meter")
 
@@ -28,7 +28,7 @@ if __name__ == '__main__':
     
     for hw in hws:
         hw_name, hw_version = hw["name"], hw["version"]
-        predictor = load_latency_predictor(hw_name, hw_version)
+        predictor = load_predictor(hw_name, hw_version)
         for filename in datasets:
             True_lat = []
             Pred_lat = []

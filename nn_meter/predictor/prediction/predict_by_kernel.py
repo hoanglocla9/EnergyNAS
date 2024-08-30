@@ -83,7 +83,9 @@ def nn_predict(predictors, kernel_units):
         for key in latency_dict:
             if key in power_dict:
                 energy += latency_dict[key] * power_dict[key]
-        return energy
+        return {"latency": sum(latency_dict.values()), "energy": energy/1000}
+    
     elif "latency" in predictors and "power" not in predictors:
         latency_dict = predict_model_power(features, predictors["latency"])
-        return sum(latency_dict.values())
+        print(latency_dict)
+        return {"latency": sum(latency_dict.values())} 

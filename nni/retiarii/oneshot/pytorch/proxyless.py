@@ -109,7 +109,7 @@ class HardwareLatencyEstimator:
         import nn_meter  # pylint: disable=import-error
         _logger.info(f'Load latency predictor for applied hardware: {applied_hardware}.')
         self.predictor_name = applied_hardware
-        self.latency_predictor = nn_meter.load_latency_predictor(applied_hardware)
+        self.latency_predictor = nn_meter.load_predictor(applied_hardware)
         self.block_latency_table = self._form_latency_table(model, dummy_input, dump_lat_table=dump_lat_table)
 
     def _form_latency_table(self, model, dummy_input, dump_lat_table):

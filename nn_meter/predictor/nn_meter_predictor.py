@@ -48,7 +48,7 @@ def load_predictor_config(predictor_name: str, predictor_version: float = None):
         raise NotImplementedError('No predictor that meets the required name and version, please try again.')
 
 
-def load_latency_predictor(predictor_name: str, predictor_version: float = None):
+def load_predictor(predictor_name: str, hardware_metrics=["latency"]):
     """ 
     return the predictor model according to the given predictor name and version
     @params:
@@ -58,14 +58,16 @@ def load_latency_predictor(predictor_name: str, predictor_version: float = None)
     
     predictor_version: string to specify the version of the target latency predictor. If not specified (default as None), the lateast version of the 
         predictor will be loaded.
+
+    hardware_metric: we support latency and energy, when we use "energy" we need to use the 
     """
     user_data_folder = get_user_data_folder()
-    pred_info = load_predictor_config(predictor_name, predictor_version)
+    pred_info = load_predictor_config(predictor_name)
 
-    if "download" in pred_info:
-        kernel_predictors, fusionrule = loading_to_local(pred_info, os.path.join(user_data_folder, 'predictor'))
+    if "package_location" not in pred_info:
+        raise Exception ("Missing the predictors' packages. You should manually download predictors to your local!!!")
     else:
-        kernel_predictors, fusionrule = loading_customized_predictor(pred_info)
+        kernel_predictors, fusionrule = loading_customized_predictor(pred_info, hardware_metrics)
         
     return nnMeterPredictor(kernel_predictors, fusionrule)
 
@@ -101,7 +103,7 @@ class nnMeterPredictor:
             as it could fail in some case. Onnx-based converter is much slower but stable compared to NNI-based converter. This parameter is only accessed when 
             model_type == 'torch'
         """
-        logging.info("Start latency prediction ...")
+        logging.info("Start hardware metrics prediction ...")
         if isinstance(model, str):
             graph = model_file_to_graph(model, model_type, input_shape, apply_nni=apply_nni)
         else:
@@ -111,5 +113,8 @@ class nnMeterPredictor:
         self.kd.load_graph(graph)
 
         py = nn_predict(self.kernel_predictors, self.kd.get_kernels()) # in unit of ms
-        logging.info(f"Predict latency: {py} ms")
+        if 'energy' in py:
+            logging.info(f"Predict latency: {py['latency']} ms --- Predict Energy: {py['energy']} mJ")
+        else:
+            logging.info(f"Predict latency: {py['latency']} ms")
         return py

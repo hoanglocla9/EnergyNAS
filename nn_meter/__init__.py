@@ -11,7 +11,7 @@ from functools import partial, partialmethod
 
 from .predictor import (
     nnMeterPredictor,
-    load_latency_predictor,
+    load_predictor,
     list_latency_predictors,
     latency_metrics
 )

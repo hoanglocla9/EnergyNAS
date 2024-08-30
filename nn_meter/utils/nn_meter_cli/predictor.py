@@ -3,7 +3,7 @@
 import os
 import logging
 from glob import glob
-from nn_meter import list_latency_predictors, load_latency_predictor, model_file_to_graph
+from nn_meter import list_latency_predictors, load_predictor, model_file_to_graph
 
 
 def list_latency_predictors_cli():
@@ -36,7 +36,7 @@ def apply_latency_predictor_cli(args):
         return
 
     # load predictor
-    predictor = load_latency_predictor(args.predictor, args.predictor_version)
+    predictor = load_predictor(args.predictor, args.predictor_version)
 
     # specify model for prediction
     if not args.torchvision: # input of tensorflow, onnx, nnmeter-ir and nni-ir is file name, while input of torchvision is string list

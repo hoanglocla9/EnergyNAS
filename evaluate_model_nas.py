@@ -1,7 +1,7 @@
 from model import *
 from data import *
 
-from nn_meter import load_latency_predictor
+from nn_meter import load_predictor
 import os
 import pandas as pd
 import numpy as np
@@ -139,7 +139,7 @@ class HardwareLatencyEstimator:
     def __init__(self, applied_hardware):
         import nn_meter  # pylint: disable=import-error
         self.predictor_name = applied_hardware
-        self.latency_predictor = nn_meter.load_latency_predictor(applied_hardware)
+        self.latency_predictor = nn_meter.load_predictor(applied_hardware)
 
     def estimate(self, model, dummy_input=(1, 1, 33)):
         model = adjust_model_code(model)

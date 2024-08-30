@@ -47,7 +47,7 @@ def loading_to_local(pred_info, dir):
     return predictors, fusionrule
 
 
-def loading_customized_predictor(pred_info, mode="energy"):
+def loading_customized_predictor(pred_info, hardware_metrics=["latency"]):
     """ loading customized predictor
 
     @params:
@@ -55,12 +55,10 @@ def loading_customized_predictor(pred_info, mode="energy"):
     """
     hardware = pred_info['name']
     ppath = pred_info['package_location']
+    latency_ppath = os.path.join(ppath, "latency") 
+    isexist = check_predictors(latency_ppath, pred_info["kernel_predictors"])
 
-    if mode == "latency":
-        latency_ppath = os.path.join(ppath, "latency")
-        isexist = check_predictors(latency_ppath, pred_info["kernel_predictors"])
-    elif mode == "energy":
-        latency_ppath = os.path.join(ppath, "latency")
+    if "energy" in hardware_metrics:
         power_ppath = os.path.join(ppath, "power")
         isexist = check_predictors(latency_ppath, pred_info["kernel_predictors"]) and check_predictors(power_ppath, pred_info["kernel_predictors"])
       
@@ -77,7 +75,7 @@ def loading_customized_predictor(pred_info, mode="energy"):
             model = pickle.load(f)
             predictors["latency"][pname] = model
 
-    if mode == "energy":
+    if "energy" in hardware_metrics:
         predictors["power"] = {}
         ps = glob(os.path.join(power_ppath, "**.pkl"))
         for p in ps:

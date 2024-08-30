@@ -12,7 +12,7 @@ from nni.retiarii.converter import convert_to_graph
 from nni.retiarii.converter.graph_gen import GraphConverterWithShape
 from nni.retiarii.converter.utils import flatten_model_graph_without_layerchoice, is_layerchoice_node
 
-from nn_meter import load_latency_predictor
+from nn_meter import load_predictor
 
 from sklearn.model_selection import KFold
 import logging
@@ -85,21 +85,21 @@ class MyDataset(Dataset):
         return self.x[idx],self.y[idx]
     
 
-class HardwareLatencyEstimator:
-    def __init__(self, applied_hardware):
+class HardwareMetricEstimator:
+    def __init__(self, applied_hardware, hardware_metrics=["latency"]):
         import nn_meter  # pylint: disable=import-error
         _logger.info(f'Load latency predictor for applied hardware: {applied_hardware}.')
         self.predictor_name = applied_hardware
-        self.latency_predictor = nn_meter.load_latency_predictor(applied_hardware)
+        self.predictor = nn_meter.load_predictor(applied_hardware, hardware_metrics)
 
     def estimate(self, model, dummy_input=(1, 1, 33)):
         model = adjust_model_code(model)
         script_module = torch.jit.script(model)
         base_model_ir = convert_to_graph(script_module, model,
                                          converter=GraphConverterWithShape(), dummy_input=torch.randn(*dummy_input))
-        latency = self.latency_predictor.predict(base_model_ir, model_type = 'nni-ir')
+        result = self.predictor.predict(base_model_ir, model_type = 'nni-ir')
 
-        return latency
+        return result
 
 
     
@@ -127,8 +127,8 @@ def adjust_model_code(model):
     
 
 @nni.trace
-class LatencyFilter:
-    def __init__(self, threshold, predictor, predictor_version=None, reverse=False):
+class HardwareMetricFilter:
+    def __init__(self, thresholds, applied_hardware, reverse=False):
         """
         Filter the models according to predcted latency.
         Parameters
@@ -141,13 +141,23 @@ class LatencyFilter:
             if reverse is `False`, then the model returns `True` when `latency < threshold`,
             else otherwisse
         """
-        self.predictors = load_latency_predictor(predictor, predictor_version)
-        self.threshold = threshold
+            
+        self.predictors = load_predictor(applied_hardware)
+        self.thresholds = thresholds
+        self.reverse = reverse
         
     def __call__(self, ir_model):
-        latency = self.predictors.predict(ir_model, model_type = 'nni-ir')
-        return latency < self.threshold
-    
+        estimated_values = self.predictors.predict(ir_model, model_type = 'nni-ir')
+        if not self.reverse:
+            result = True
+            for m in self.thresholds:
+                result = result and estimated_values[m] < self.thresholds[m]
+            return result
+        else:
+            result = True
+            for m in self.thresholds:
+                result = result and estimated_values[m] > self.thresholds[m]
+            return result
 
 def latency_reward_component(latency, target_latency):
     alpha, beta = -0.07, -0.07 # as in the paper  https://openaccess.thecvf.com/content_CVPR_2019/papers/Tan_MnasNet_Platform-Aware_Neural_Architecture_Search_for_Mobile_CVPR_2019_paper.pdf
@@ -158,17 +168,32 @@ def latency_reward_component(latency, target_latency):
 
 def reward_function(accuracy, latency, target_latency):
     latency_component = latency_reward_component(latency, target_latency)
-    normalized_accuracy = (accuracy - 0.35) / ( 8-0.35)
-    return -1.0 * normalized_accuracy * latency_component
+    # normalized_accuracy = (accuracy - 0.35) / ( 8-0.35)
+    accuracy
+    return -1.0 * accuracy * latency_component
 
 @nni.trace
-def evaluate_model(model_cls, lag_range, target, optimized_metric, target_latency):
-    final_metrics = {"default": [], "MSE": [], "MAE": [], "Latency": []}
-
-    if "Latency" in optimized_metric:
-        latency_estimator = nni.trace(HardwareLatencyEstimator)('myriadvpu_openvino2019r2')
+def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_values, mode="filter", target_device="myriadvpu_openvino2019r2"):
+    """
+        target_device: the target device name. We support two platforms, namely myriadvpu_openvino2019r2, jetsonnano_jetpack46.
+        mode: mode for NAS problem, we support filter and multi-objective mode. Filter mode is suitable for contraint single objective problem.
+        optimized_metrics: Optimized metrics, we support following metrics: MAE, MSE, latency and energy. ("energy" option also includes "latency")
+        target: name of the targeted feature.
+        lag_range: number of time lags.
+    """
+    final_metrics = {"default": [], "MSE": [], "MAE": []}
+    hardware_metrics = []
+    if "energy" in optimized_metrics:
+        final_metrics[ "latency"] = []
+        final_metrics["energy"] = []
+        hardware_metrics = ["energy", "latency"]
+        estimator = nni.trace(HardwareMetricEstimator)(target_device, hardware_metrics)
+    elif "latency" in optimized_metrics:
+        final_metrics[ "latency"] = []
+        hardware_metrics = ["latency"]
+        estimator = nni.trace(HardwareMetricEstimator)(target_device, hardware_metrics)
     else:
-        latency_estimator = None
+        estimator = None
 
     k_folds = 3
     kfold = KFold(n_splits=k_folds, shuffle=True)
@@ -230,29 +255,36 @@ def evaluate_model(model_cls, lag_range, target, optimized_metric, target_latenc
             train_loss = train_loss / len(train_loader.sampler.indices)
             train_accuracy = train_accuracy / len(train_loader.sampler.indices)
             
-            if "MAE" in optimized_metric:
+            if "MAE" in optimized_metrics:
                 intermediate_metrics = {"default": -1.0 * valid_loss, "MSE": -1.0 * valid_accuracy, "MAE": -1.0 * valid_loss}
             else:
                 intermediate_metrics = {"default": -1.0 * valid_accuracy, "MSE": -1.0 * valid_accuracy, "MAE": -1.0 * valid_loss}
             nni.report_intermediate_result(intermediate_metrics)
         
-        if latency_estimator != None:
-            latency = latency_estimator.estimate(model_cls())
-            print(latency)
-            final_metrics["Latency"].append(latency)
-            final_metrics["MSE"].append(-1.0 * min(min_acc_list))
-            final_metrics["MAE"].append(-1.0 * min(min_loss_list))
-            if "MAE" in optimized_metric:
-                final_metrics["default"].append(reward_function(min(min_loss_list), latency, target_latency))
+        if estimator != None:
+            hardware_estimated_result = estimator.estimate(model_cls())
+            for hw_metric in hardware_metrics:
+                final_metrics[hw_metric].append(hardware_estimated_result[hw_metric])
+
+            final_metrics["MSE"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
+            final_metrics["MAE"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
+            if mode != "filter":
+                if "MAE" in optimized_metrics:
+                    final_metrics["default"].append(reward_function(sum(min_loss_list)/len(min_loss_list), hardware_estimated_result['latency'], target_values["latency"]))
+                else:
+                    final_metrics["default"].append(reward_function(sum(min_acc_list)/len(min_acc_list), hardware_estimated_result['latency'], target_values["latency"]))
             else:
-                final_metrics["default"].append(reward_function(min(min_acc_list), latency, target_latency))
+                if "MAE" in optimized_metrics:
+                    final_metrics["default"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
+                else:
+                    final_metrics["default"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
         else:
-            final_metrics["MSE"].append(-1.0 * min(min_acc_list))
-            final_metrics["MAE"].append(-1.0 * min(min_loss_list))
-            if optimized_metric == "MAE":
-                final_metrics["default"].append(-1.0 * min(min_loss_list))
+            final_metrics["MSE"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
+            final_metrics["MAE"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
+            if optimized_metrics == "MAE":
+                final_metrics["default"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
             else:
-                final_metrics["default"].append(-1.0 * min(min_acc_list))
+                final_metrics["default"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
     metric = {}
     for key in final_metrics:
         if len(final_metrics[key]) == 0:

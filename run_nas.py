@@ -1,7 +1,7 @@
 import nni.retiarii.strategy as strategy
 from nni.retiarii.evaluator import FunctionalEvaluator
 from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-from nas.learning_utils import evaluate_model
+from nas.learning_utils import evaluate_model, HardwareMetricFilter
 from nas.model import CalibrationModelSpace
 from nas.mutator import BlockMutator
 import logging, argparse, os
@@ -13,30 +13,41 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Just an example", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-s", "--strategy", type=str, help="search stragegy, currently, only supported for random and evolution strategies", default="random")
     parser.add_argument("-r", "--lag_range", type=int, help="number of lag features", default=26)
-    parser.add_argument("-n", "--trial_number", type=int, help="number of trial steps", default=500)
+    parser.add_argument("-n", "--trial_number", type=int, help="number of trial steps", default=20)
     parser.add_argument("-c", "--n_gpus", type=int, help="number of gpus", default=0)
     parser.add_argument("-p", "--port", type=int, help="NNI WebUI Port", default=8081)
     parser.add_argument("-t", "--target", type=str, help="Training Label Name", default="ref_ch4(ppm)")
-    parser.add_argument("-m", "--metrics", type=str, help="The Optimized Metric", default=["MAE", "Latency"])
+    parser.add_argument("-me", "--metrics", type=list, help="The Optimized Metric", default=["MAE", "energy"])
+    parser.add_argument("-m", "--mode", type=str, help="Constraint or MOO mode", default="filter")
+    parser.add_argument("-th", "--target_hardware", type=str, help="Target hardware", default="myriadvpu_openvino2019r2")
+    
+    thresholds = {"latency": 100}
 
     args = parser.parse_args()
     cfg = vars(args)
-
+    if "energy" in cfg['metrics'] and "latency" in cfg['metrics']:
+        cfg['metrics'].remove("latency")
     model_space = CalibrationModelSpace()
 
     evaluator = FunctionalEvaluator(evaluate_model, lag_range=cfg['lag_range'], 
                                         target=cfg['target'], 
-                                        optimized_metric=cfg['metrics'], 
-                                        target_latency=5) 
+                                        optimized_metrics=cfg['metrics'], 
+                                        mode=cfg['mode'],
+                                        target_values=thresholds) 
     
+    if cfg['mode'] == "filter":
+        model_filter = HardwareMetricFilter(thresholds, applied_hardware=cfg['target_hardware'], reverse=False)
+    else:
+        model_filter = None 
 
     if cfg["strategy"] == "random":
-        search_strategy = strategy.Random(dedup=True)
+        search_strategy = strategy.Random(dedup=True, model_filter=model_filter)
     elif cfg["strategy"] == "evolution":
         search_strategy = strategy.RegularizedEvolution(optimize_mode="maximize", 
                                                         sample_size = cfg["trial_number"]//8, 
                                                         population_size=cfg["trial_number"]//2, 
-                                                        cycles=cfg["trial_number"]
+                                                        cycles=cfg["trial_number"],
+                                                        model_filter=model_filter
                                                     )
     elif cfg["strategy"] == "reinforce":
         if cfg["trial_number"] >= 20:
