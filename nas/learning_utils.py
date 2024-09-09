@@ -2,162 +2,12 @@ import nni, os
 
 import numpy as np 
 
-from torch.utils.data import DataLoader, SubsetRandomSampler, Dataset
+from torch.utils.data import DataLoader, SubsetRandomSampler
 import torch
-
-import pandas as pd
-from pandas import DataFrame, concat
-
-from nni.retiarii.converter import convert_to_graph
-from nni.retiarii.converter.graph_gen import GraphConverterWithShape
-from nni.retiarii.converter.utils import flatten_model_graph_without_layerchoice, is_layerchoice_node
-
-from nn_meter import load_predictor
-
+from .data import MISO_Data_v1
 from sklearn.model_selection import KFold
-import logging
-_logger = logging.getLogger(__name__)
-
-class StandardScaler:
-
-    def __init__(self, mean=None, std=None, epsilon=1e-7):
-        """Standard Scaler.
-        The class can be used to normalize PyTorch Tensors using native functions. The module does not expect the
-        tensors to be of any specific shape; as long as the features are the last dimension in the tensor, the module
-        will work fine.
-        :param mean: The mean of the features. The property will be set after a call to fit.
-        :param std: The standard deviation of the features. The property will be set after a call to fit.
-        :param epsilon: Used to avoid a Division-By-Zero exception.
-        """
-        self.mean = mean
-        self.std = std
-        self.epsilon = epsilon
-
-    def fit(self, values):
-        dims = list(range(values.dim() - 1))
-        self.mean = torch.mean(values, dim=dims)
-        self.std = torch.std(values, dim=dims)
-
-    def transform(self, values):
-        return (values - self.mean) / (self.std + self.epsilon)
-
-    def fit_transform(self, values):
-        self.fit(values)
-        return self.transform(values)
-
-@nni.trace
-class MyDataset(Dataset):
-    def __init__(self, lag_range, target):
-        super().__init__()
-        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-        self.load_data(lag_range, target)
-        self.x=torch.tensor(self.preprocessed_df[self.features].values,dtype=torch.float32).reshape(-1, 1, len(self.features))
-        self.y=torch.tensor(self.preprocessed_df[self.target].values,dtype=torch.float32).reshape(-1, 1).to(device)
-        self.scaler = StandardScaler()
-        self.x = self.scaler.fit_transform(self.x).to(device)
-        
-    def load_data(self, lag_range, target):
-        #parent_dir = os.path.abspath(os.path.join(os.path.abspath(os.getcwd()), os.pardir))
-        data_dir = "./data/" #os.path.join(parent_dir,"data")
-        # Load sensor raw data into a pandas data frame
-        rawdf = pd.read_csv(os.path.join(data_dir,'MISO_220621-0627_1mnDataset_K96.csv'))
-        
-        self.features = ['pressure(hPa)', 'rh(%)', 'temp_sensor(C)', 'k96_lpl_raw', 'k96_spl_raw', 'k96_mpl_raw', "k96_h2o(ppm) ", "k96_ch4(ppm) "]
-        if target == "ref_h2o(ppm)":
-            self.features += ["k96_h2o(ppm) _" + str(i) for i in range(1, lag_range)]
-            extra_prefix = "k96_h2o(ppm) " 
-        elif target == "ref_ch4(ppm)":
-            self.features += ["k96_ch4(ppm) _" + str(i) for i in range(1, lag_range)]
-            extra_prefix = "k96_ch4(ppm) " 
-        else:
-            raise Exception ("ERROR with Target Name !!!")
-        values = nni.trace(DataFrame)(rawdf[extra_prefix].values)
-        lag_df = concat([values.shift(j) for j in range(lag_range)], axis=1)
-        lag_df.columns = [extra_prefix + "_" +str(j) for j in range(lag_range)]
-        self.preprocessed_df =  pd.concat([rawdf, lag_df], axis=1)[lag_range:]
-        self.target = target
-        
-        
-    def __len__(self):
-        return len(self.y)
-   
-    def __getitem__(self,idx):
-        return self.x[idx],self.y[idx]
-    
-
-class HardwareMetricEstimator:
-    def __init__(self, applied_hardware, hardware_metrics=["latency"]):
-        import nn_meter  # pylint: disable=import-error
-        _logger.info(f'Load latency predictor for applied hardware: {applied_hardware}.')
-        self.predictor_name = applied_hardware
-        self.predictor = nn_meter.load_predictor(applied_hardware, hardware_metrics)
-
-    def estimate(self, model, dummy_input=(1, 1, 33)):
-        model = adjust_model_code(model)
-        script_module = torch.jit.script(model)
-        base_model_ir = convert_to_graph(script_module, model,
-                                         converter=GraphConverterWithShape(), dummy_input=torch.randn(*dummy_input))
-        result = self.predictor.predict(base_model_ir, model_type = 'nni-ir')
-
-        return result
-
-
-    
-def my_import(name):
-    components = name.split('.')
-    mod = __import__(components[0])
-    for comp in components[1:]:
-        mod = getattr(mod, comp)
-    return mod
-
-def adjust_model_code(model):
-    import inspect, re
-    path = inspect.getfile(model.__class__)
-    model_code = ""
-    with open (path, "r") as f:
-        model_code = f.read()
-
-    model_code = re.sub(r"class _model\(nn\.Module\)(.*\n)*.*return __layers", "", model_code)
-    with open (path, "w") as f:
-        f.write(model_code)
-    
-    module_name = path.replace('/', '.')[-26:-3] +"._model__layers"
-    _model__layers = my_import(module_name)
-    return _model__layers()
-    
-
-@nni.trace
-class HardwareMetricFilter:
-    def __init__(self, thresholds, applied_hardware, reverse=False):
-        """
-        Filter the models according to predcted latency.
-        Parameters
-        ----------
-        threshold: `float`
-            the threshold of latency
-        config, hardware:
-            determine the targeted device
-        reverse: `bool`
-            if reverse is `False`, then the model returns `True` when `latency < threshold`,
-            else otherwisse
-        """
-            
-        self.predictors = load_predictor(applied_hardware)
-        self.thresholds = thresholds
-        self.reverse = reverse
-        
-    def __call__(self, ir_model):
-        estimated_values = self.predictors.predict(ir_model, model_type = 'nni-ir')
-        if not self.reverse:
-            result = True
-            for m in self.thresholds:
-                result = result and estimated_values[m] < self.thresholds[m]
-            return result
-        else:
-            result = True
-            for m in self.thresholds:
-                result = result and estimated_values[m] > self.thresholds[m]
-            return result
+from .estimator import  HardwareMetricEstimator
+from torchmetrics.regression import MeanAbsolutePercentageError
 
 def latency_reward_component(latency, target_latency):
     alpha, beta = -0.07, -0.07 # as in the paper  https://openaccess.thecvf.com/content_CVPR_2019/papers/Tan_MnasNet_Platform-Aware_Neural_Architecture_Search_for_Mobile_CVPR_2019_paper.pdf
@@ -169,7 +19,7 @@ def latency_reward_component(latency, target_latency):
 def reward_function(accuracy, latency, target_latency):
     latency_component = latency_reward_component(latency, target_latency)
     # normalized_accuracy = (accuracy - 0.35) / ( 8-0.35)
-    accuracy
+    # accuracy
     return -1.0 * accuracy * latency_component
 
 @nni.trace
@@ -177,11 +27,11 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
     """
         target_device: the target device name. We support two platforms, namely myriadvpu_openvino2019r2, jetsonnano_jetpack46.
         mode: mode for NAS problem, we support filter and multi-objective mode. Filter mode is suitable for contraint single objective problem.
-        optimized_metrics: Optimized metrics, we support following metrics: MAE, MSE, latency and energy. ("energy" option also includes "latency")
+        optimized_metrics: Optimized metrics, we support following metrics: MAE, MPAE, latency and energy. ("energy" option also includes "latency")
         target: name of the targeted feature.
         lag_range: number of time lags.
     """
-    final_metrics = {"default": [], "MSE": [], "MAE": []}
+    final_metrics = {"default": [], "MPAE": [], "MAE": []}
     hardware_metrics = []
     if "energy" in optimized_metrics:
         final_metrics[ "latency"] = []
@@ -194,12 +44,15 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
         estimator = nni.trace(HardwareMetricEstimator)(target_device, hardware_metrics)
     else:
         estimator = None
+    
+    if estimator != None:
+        hardware_estimated_result = estimator.estimate(model_cls())
 
     k_folds = 3
     kfold = KFold(n_splits=k_folds, shuffle=True)
-    dataset = nni.trace(MyDataset)(lag_range, target)
+    dataset = nni.trace(MISO_Data_v1)(lag_range, target)
     criterion = torch.nn.L1Loss()
-    acc_fn = torch.nn.MSELoss()
+    acc_fn = MeanAbsolutePercentageError()## torch.nn.MSELoss()
 
     average_loss = 0.0
     average_min = 0.0
@@ -231,7 +84,7 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
                     output = model(tensor_x)
                     loss = criterion(output, tensor_y)
                     valid_loss += loss.item() * len(tensor_x)
-                    valid_accuracy += acc_fn(output, tensor_y).item() * len(tensor_x)
+                    valid_accuracy += acc_fn(output.squeeze().cpu(), tensor_y.squeeze().cpu()).item() * len(tensor_x)
 
 
                 valid_loss = valid_loss / len(valid_loader.sampler.indices)
@@ -250,36 +103,43 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item() * len(tensor_x)
-                train_accuracy += acc_fn(output, tensor_y).item() * len(tensor_x)
+                train_accuracy += acc_fn(output.squeeze().cpu(), tensor_y.squeeze().cpu()).item() * len(tensor_x)
 
             train_loss = train_loss / len(train_loader.sampler.indices)
             train_accuracy = train_accuracy / len(train_loader.sampler.indices)
             
             if "MAE" in optimized_metrics:
-                intermediate_metrics = {"default": -1.0 * valid_loss, "MSE": -1.0 * valid_accuracy, "MAE": -1.0 * valid_loss}
+                intermediate_metrics = {"default": -1.0 * valid_loss, "MPAE": -1.0 * valid_accuracy, "MAE": -1.0 * valid_loss}
             else:
-                intermediate_metrics = {"default": -1.0 * valid_accuracy, "MSE": -1.0 * valid_accuracy, "MAE": -1.0 * valid_loss}
+                intermediate_metrics = {"default": -1.0 * valid_accuracy, "MPAE": -1.0 * valid_accuracy, "MAE": -1.0 * valid_loss}
             nni.report_intermediate_result(intermediate_metrics)
         
         if estimator != None:
-            hardware_estimated_result = estimator.estimate(model_cls())
+            # hardware_estimated_result = estimator.estimate(model_cls())
             for hw_metric in hardware_metrics:
                 final_metrics[hw_metric].append(hardware_estimated_result[hw_metric])
 
-            final_metrics["MSE"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
+            final_metrics["MPAE"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
             final_metrics["MAE"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
-            if mode != "filter":
+            if mode == "mmo":
                 if "MAE" in optimized_metrics:
                     final_metrics["default"].append(reward_function(sum(min_loss_list)/len(min_loss_list), hardware_estimated_result['latency'], target_values["latency"]))
                 else:
                     final_metrics["default"].append(reward_function(sum(min_acc_list)/len(min_acc_list), hardware_estimated_result['latency'], target_values["latency"]))
-            else:
+            elif mode == "filter":
                 if "MAE" in optimized_metrics:
                     final_metrics["default"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
                 else:
                     final_metrics["default"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
+            elif mode == "debug":
+                if "MAE" in optimized_metrics:
+                    final_metrics["default"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
+                else:
+                    final_metrics["default"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
+            else:
+                raise Exception (f"Not Support this mode \"{mode}\" yet!")
         else:
-            final_metrics["MSE"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
+            final_metrics["MPAE"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
             final_metrics["MAE"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
             if optimized_metrics == "MAE":
                 final_metrics["default"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))

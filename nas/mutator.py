@@ -155,3 +155,96 @@ class BlockMutator(Mutator):
                     'out_features': 1
             })
             update_node_attribute(node, [[1, in_ch]], [[1, 1]])
+
+
+
+class MLPMutator(Mutator):
+    def __init__(self, target):
+        super(MLPMutator, self).__init__()
+        self.target = target
+
+    def mutate(self, model):
+        nodes = model.get_nodes_by_label(self.target)
+        assert len(nodes) == 1
+        node = nodes[0]
+        node.name = self.target + "_0"
+        graph = node.graph
+        
+        related_info = node.operation.parameters
+
+        # tail parameters
+        n_input_features = related_info['n_input_features']
+        n_neurons = self.choice(related_info['n_neurons_option'])
+        fc_activation_fn = self.choice(related_info['fc_activation_fn_option'])
+        fc_n_layer = self.choice(related_info['fc_n_layer_option'])
+        dropout_rate = self.choice(related_info['dropout_option'])
+        # update the placeholder to be a new operation
+        if fc_n_layer > 1:
+            node = graph.insert_node_on_edge(node.outgoing_edges[0],
+                '{}_fc_0'.format(self.target), "__torch__.nni.retiarii.nn.pytorch.Linear", {
+                    'in_features': n_input_features,
+                    'out_features': n_neurons
+            })
+            update_node_attribute(node, [[1, n_input_features]], [[1, n_neurons]])
+            if "None" not in fc_activation_fn:
+                node = graph.insert_node_on_edge(node.outgoing_edges[0],
+                    '{}_fc_activation_0'.format(self.target),
+                    fc_activation_fn, {})
+                update_node_attribute(node, [[1, n_neurons]], [[1, n_neurons]])
+            if dropout_rate > 0:
+                node = graph.insert_node_on_edge(node.outgoing_edges[0],
+                        '{}_fc_dropout_0'.format(self.target),
+                        "__torch__.nni.retiarii.nn.pytorch.Dropout", {'p': dropout_rate})
+                update_node_attribute(node, [[1, n_neurons]], [[1, n_neurons]])
+                
+            if fc_n_layer > 2:
+                for i in range(1, fc_n_layer-1):
+                    node = graph.insert_node_on_edge(node.outgoing_edges[0],
+                        '{}_fc_{}'.format(self.target, i), "__torch__.nni.retiarii.nn.pytorch.Linear", {
+                            'in_features': n_neurons,
+                            'out_features': n_neurons
+                    })
+                    update_node_attribute(node, [[1, n_neurons]], [[1, n_neurons]])
+                    if "None" not in fc_activation_fn:
+                        node = graph.insert_node_on_edge(node.outgoing_edges[0],
+                            '{}_fc_activation_{}'.format(self.target, i),
+                            fc_activation_fn, {})
+                        update_node_attribute(node, [[1, n_neurons]], [[1, n_neurons]])
+                    if dropout_rate > 0:
+                        node = graph.insert_node_on_edge(node.outgoing_edges[0],
+                                '{}_fc_dropout_{}'.format(self.target, i),
+                                "__torch__.nni.retiarii.nn.pytorch.Dropout", {'p': dropout_rate})
+                        update_node_attribute(node, [[1, n_neurons]], [[1, n_neurons]])
+            node = graph.insert_node_on_edge(node.outgoing_edges[0],
+                '{}_fc_{}'.format(self.target, fc_n_layer-1),
+                "__torch__.nni.retiarii.nn.pytorch.Linear", {
+                    'in_features': n_neurons,
+                    'out_features': 1
+                })
+            update_node_attribute(node, [[1, n_neurons]], [[1, 1]])
+        else:
+            node = graph.insert_node_on_edge(node.outgoing_edges[0],
+                '{}_fc_0'.format(self.target), "__torch__.nni.retiarii.nn.pytorch.Linear", {
+                    'in_features': n_input_features,
+                    'out_features': 1
+            })
+            update_node_attribute(node, [[1, n_input_features]], [[1, 1]])
+        
+
+
+# class ResNetMutator(Mutator):
+#     def __init__(self, target):
+#         super(ResNetMutator, self).__init__()
+#         self.target = target
+
+#     def mutate_for_resnet(self, node):
+#         related_info = node.operation.parameters
+
+
+#     def mutate(self, model):
+#         nodes = model.get_nodes_by_label(self.target)
+#         assert len(nodes) == 1
+#         node = nodes[0]
+#         node.name = self.target + "_0"
+#         graph = node.graph
+        
