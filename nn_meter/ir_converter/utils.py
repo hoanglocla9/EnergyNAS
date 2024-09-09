@@ -6,6 +6,8 @@ from .onnx_converter import OnnxConverter
 from .frozenpb_converter import FrozenPbConverter
 from .torch_converter import NNIBasedTorchConverter, OnnxBasedTorchConverter, NNIIRConverter
 from nn_meter.utils.import_package import try_import_onnx, try_import_torch, try_import_torchvision_models
+
+from onnxsim import simplify
 logging = logging.getLogger("nn-Meter")
 
 
@@ -36,7 +38,8 @@ def model_file_to_graph(filename: str, model_type: str, input_shape=(1, 3, 224, 
     if model_type == "onnx":
         onnx = try_import_onnx()
         model = onnx.load(filename)
-        return onnx_model_to_graph(model)
+        model_simp, check = simplify(model)
+        return onnx_model_to_graph(model_simp)
 
     elif model_type == "pb":
         converter = FrozenPbConverter(filename)

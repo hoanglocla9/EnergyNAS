@@ -1,15 +1,15 @@
 import nni.retiarii.strategy as strategy
 from nni.retiarii.evaluator import FunctionalEvaluator
 from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-from nas.learning_utils import evaluate_model, HardwareMetricFilter
-from nas.model import CalibrationModelSpace
-from nas.mutator import BlockMutator
+from nas.learning_utils import evaluate_model
+from nas.estimator import HardwareMetricFilter
+from nas.model import CalibrationModelSpace, MLPSpace, ResNetSpace
+from nas.mutator import MLPMutator, BlockMutator
 import logging, argparse, os
 _logger = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":
-    
     parser = argparse.ArgumentParser(description="Just an example", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-s", "--strategy", type=str, help="search stragegy, currently, only supported for random and evolution strategies", default="random")
     parser.add_argument("-r", "--lag_range", type=int, help="number of lag features", default=26)
@@ -17,9 +17,10 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--n_gpus", type=int, help="number of gpus", default=0)
     parser.add_argument("-p", "--port", type=int, help="NNI WebUI Port", default=8081)
     parser.add_argument("-t", "--target", type=str, help="Training Label Name", default="ref_ch4(ppm)")
-    parser.add_argument("-me", "--metrics", type=list, help="The Optimized Metric", default=["MAE", "energy"])
-    parser.add_argument("-m", "--mode", type=str, help="Constraint or MOO mode", default="filter")
+    parser.add_argument("-me", "--metrics", type=list, help="The Optimized Metric", default=["MPAE", "energy"])
+    parser.add_argument("-m", "--mode", type=str, help="Constraint or MOO mode", default="debug")
     parser.add_argument("-th", "--target_hardware", type=str, help="Target hardware", default="myriadvpu_openvino2019r2")
+    parser.add_argument("-bm", "--backbone_model", type=str, help="The base model of NAS", default="mlp")
     
     thresholds = {"latency": 100}
 
@@ -27,7 +28,11 @@ if __name__ == "__main__":
     cfg = vars(args)
     if "energy" in cfg['metrics'] and "latency" in cfg['metrics']:
         cfg['metrics'].remove("latency")
-    model_space = CalibrationModelSpace()
+    if cfg['backbone_model'] == 'mlp':
+        model_space = MLPSpace(n_features=cfg['lag_range']+7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+    else:
+        model_space = ResNetSpace(n_features=cfg['lag_range']+7)
+
 
     evaluator = FunctionalEvaluator(evaluate_model, lag_range=cfg['lag_range'], 
                                         target=cfg['target'], 
@@ -55,18 +60,21 @@ if __name__ == "__main__":
         else:
             search_strategy = strategy.PolicyBasedRL(max_collect=cfg["trial_number"]//2, trial_per_collect=2)
 
-
-    applied_mutators = [
-        BlockMutator('mutable_all')
-    ]
+    if cfg['backbone_model'] == "mlp":
+        applied_mutators = [
+            MLPMutator('mutable_all')
+        ]
+    else:
+        applied_mutators = []
 
     exp = RetiariiExperiment(model_space, evaluator, applied_mutators, search_strategy)
     exp_config = RetiariiExeConfig('local')
     exp_config.experiment_name = 'mnist_search'
     exp_config.execution_engine = 'base'
     exp_config.max_trial_number = cfg["trial_number"]   # spawn 4 trials at most
+
     if cfg["n_gpus"] > 0:
-        exp_config.trial_concurrency = cfg["n_gpus"]  # will run two trials concurrently
+        exp_config.trial_concurrency = cfg["n_gpus"]# will run two trials concurrently
         exp_config.trial_gpu_number = cfg["n_gpus"]
         exp_config.training_service.use_active_gpu = True
     else:
@@ -88,8 +96,20 @@ if __name__ == "__main__":
     exp.run(exp_config, port=cfg["port"])
     print("Done NAS!!!")
     print("Start to write")
-    for idx, model_code in enumerate(exp.export_top_models(top_k=50, formatter="code")):
+    for idx, model_code in enumerate(exp.export_top_models(top_k=10, formatter="code")):
         file_path = os.path.join(folder_path, "top_{}.py".format(idx + 1))
         with open(file_path, 'w') as f:
             f.write(model_code)
+
+    for idx, model_code in enumerate(exp.export_top_models(top_k=10, optimize_mode="minimize", formatter="code")):
+        file_path = os.path.join(folder_path, "bottom_{}.py".format(idx + 1))
+        with open(file_path, 'w') as f:
+            f.write(model_code)
+
+    # for idx, model_code in enumerate(exp.export_top_models(top_k=1, formatter="dict")):
+    #     print(model_code)
+        # file_path = os.path.join(folder_path, "top_{}_dict.py".format(idx + 1))
+        # with open(file_path, 'w') as f:
+        #     f.write(model_code)
+
     print("Done!!!")

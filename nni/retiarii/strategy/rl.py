@@ -12,7 +12,8 @@ try:
     from tianshou.env import BaseVectorEnv
     from tianshou.policy import BasePolicy, PPOPolicy  # pylint: disable=unused-import
     from ._rl_impl import ModelEvaluationEnv, MultiThreadEnvWorker, Preprocessor, Actor, Critic
-except ImportError:
+except ImportError as e:
+    print(e)
     has_tianshou = False
 
 

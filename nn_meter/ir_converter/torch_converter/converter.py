@@ -40,6 +40,8 @@ class NNIIRConverter:
         graph = {}
 
         for node in self.ir_model.root_graph.hidden_nodes:
+            if "input_shape" not in node.operation.parameters  and "input_shape" not in node.operation.attributes:
+                continue
             node_dict = {
                 "attr": {
                     "attr": {

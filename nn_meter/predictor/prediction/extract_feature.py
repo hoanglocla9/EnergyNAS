@@ -108,7 +108,7 @@ def get_predict_features(config):
             itensors = item["input_tensors"]
             if len(itensors[0]) == 4:
                 inputh = itensors[0][1]
-                cin = itensors[0][3]
+                cin = itensors[0][-1]
             else:
                 inputh = itensors[0][0]
                 cin = itensors[0][1]
@@ -118,8 +118,8 @@ def get_predict_features(config):
             itensors = item["input_tensors"]
             if len(itensors) == 2:
                 inputh = itensors[0][1]
-                cin1 = itensors[0][3]
-                cin2 = itensors[1][3]
+                cin1 = itensors[0][-1]
+                cin2 = itensors[1][-1]
             else:
                 inputh = itensors[0][1]
                 cin1 = 0

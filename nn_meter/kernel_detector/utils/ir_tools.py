@@ -27,8 +27,9 @@ def convert_nodes(graph):
     Resolve inconsistency between ONNX and Tensorflow
     """
     new_graph = copy.deepcopy(graph)
-
     for _, node in new_graph.items():
+        # if "type" not in node["attr"]:
+        #     continue
         type = node["attr"]["type"]
         new_type = OP_ALIAS.get(type, type)
         attr = node["attr"]["attr"]

@@ -71,6 +71,40 @@ def load_predictor(predictor_name: str, hardware_metrics=["latency"]):
         
     return nnMeterPredictor(kernel_predictors, fusionrule)
 
+__NNI_OP_MAP__ = {
+    "__torch__.nni.retiarii.nn.pytorch.Conv1d": "conv",
+    "__torch__.nni.retiarii.nn.pytorch.LogSigmoid": "relu", ## similar relu
+    "__torch__.nni.retiarii.nn.pytorch.AvgPool1d": "avgpool",
+    "__torch__.nni.retiarii.nn.pytorch.Flatten": "flatten",
+    "__torch__.nni.retiarii.nn.pytorch.Linear": "fc",
+    "__torch__.nni.retiarii.nn.pytorch.ReLU": "relu",
+    "__torch__.nni.retiarii.nn.pytorch.SiLU": "relu",
+    "__torch__.nni.retiarii.nn.pytorch.MaxPool1d": "maxpool",
+    "__torch__.nni.retiarii.nn.pytorch.Softshrink": "relu",
+    "__torch__.nni.retiarii.nn.pytorch.Tanh": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.LeakyReLU": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.Hardshrink": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.Hardsigmoid": "hwish", 
+    "__torch__.nni.retiarii.nn.pytorch.Hardtanh": "hwish", 
+    "__torch__.nni.retiarii.nn.pytorch.Hardswish": "hwish", 
+    "__torch__.nni.retiarii.nn.pytorch.PReLU": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.ELU": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.ReLU6": "relu",  
+    "__torch__.nni.retiarii.nn.pytorch.RReLU": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.CELU": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.Softplus": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.Softshrink": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.Softsign": "relu", 
+    "__torch__.nni.retiarii.nn.pytorch.Tanhshrink": "relu"  
+}
+def convert_nni_op_to_nnmeter_op(kernel_list):
+    result = []
+    for kernel in kernel_list:
+        if kernel['op'] in __NNI_OP_MAP__:
+            kernel['op'] = __NNI_OP_MAP__[kernel['op']]
+        result.append(kernel)
+
+    return result
 
 class nnMeterPredictor:
     def __init__(self, predictors, fusionrule):
@@ -104,15 +138,17 @@ class nnMeterPredictor:
             model_type == 'torch'
         """
         logging.info("Start hardware metrics prediction ...")
+        
         if isinstance(model, str):
             graph = model_file_to_graph(model, model_type, input_shape, apply_nni=apply_nni)
         else:
             graph = model_to_graph(model, model_type, input_shape=input_shape, apply_nni=apply_nni)
-        
         # logging.info(graph)
-        self.kd.load_graph(graph)
 
-        py = nn_predict(self.kernel_predictors, self.kd.get_kernels()) # in unit of ms
+        self.kd.load_graph(graph)
+        converted_kernels = convert_nni_op_to_nnmeter_op(self.kd.get_kernels())
+
+        py = nn_predict(self.kernel_predictors, converted_kernels) # in unit of ms
         if 'energy' in py:
             logging.info(f"Predict latency: {py['latency']} ms --- Predict Energy: {py['energy']} mJ")
         else:
