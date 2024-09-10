@@ -143,17 +143,12 @@ class AzureBlobSharedStorageService extends sharedStorage_1.SharedStorageService
             this.log.error(errorMessage);
             return Promise.reject(errorMessage);
         }
-        try {
-            this.log.debug(`Local mount command is: ${this.localMountCommand}`);
-            const result = await child_process_promise_1.default.exec(this.localMountCommand);
-            if (result.stderr) {
-                throw new Error(result.stderr);
-            }
-        }
-        catch (error) {
-            const errorMessage = `${this.storageType} Shared Storage: Mount ${this.storageAccountName}/${this.containerName} to ${this.localMountPoint} failed, error is ${error}`;
-            this.log.error(errorMessage);
-            return Promise.reject(errorMessage);
+        this.log.debug(`Local mount command is: ${this.localMountCommand}`);
+        const result = await child_process_promise_1.default.exec(this.localMountCommand);
+        if (result.stderr) {
+            this.log.warning(`${this.storageType} Shared Storage: Mount ${this.storageAccountName}/${this.containerName} to ${this.localMountPoint}. Stderr is not empty.`);
+            this.log.warning(`Stdout: ${result.stdout}`);
+            this.log.warning(`Stderr: ${result.stderr}`);
         }
         return Promise.resolve();
     }

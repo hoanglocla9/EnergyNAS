@@ -12,6 +12,7 @@ class DlcClient {
     podCount;
     ecsSpec;
     region;
+    workspaceId;
     nasDataSourceId;
     ossDataSourceId;
     accessKeyId;
@@ -21,7 +22,8 @@ class DlcClient {
     userCommand;
     logDir;
     pythonShellClient;
-    constructor(type, image, jobType, podCount, experimentId, environmentId, ecsSpec, region, nasDataSourceId, accessKeyId, accessKeySecret, userCommand, logDir, ossDataSourceId) {
+    status;
+    constructor(type, image, jobType, podCount, experimentId, environmentId, ecsSpec, region, workspaceId, nasDataSourceId, accessKeyId, accessKeySecret, userCommand, logDir, ossDataSourceId) {
         this.log = log_1.getLogger('DlcClient');
         this.type = type;
         this.image = image;
@@ -30,6 +32,7 @@ class DlcClient {
         this.ecsSpec = ecsSpec;
         this.image = image;
         this.region = region;
+        this.workspaceId = workspaceId;
         this.nasDataSourceId = nasDataSourceId;
         if (ossDataSourceId !== undefined) {
             this.ossDataSourceId = ossDataSourceId;
@@ -43,6 +46,7 @@ class DlcClient {
         this.environmentId = environmentId;
         this.userCommand = userCommand;
         this.logDir = logDir;
+        this.status = '';
     }
     submit() {
         const deferred = new ts_deferred_1.Deferred();
@@ -57,6 +61,7 @@ class DlcClient {
                 '--pod_count', String(this.podCount),
                 '--ecs_spec', this.ecsSpec,
                 '--region', this.region,
+                '--workspace_id', this.workspaceId,
                 '--nas_data_source_id', this.nasDataSourceId,
                 '--oss_data_source_id', this.ossDataSourceId,
                 '--access_key_id', this.accessKeyId,
@@ -67,16 +72,40 @@ class DlcClient {
             ]
         });
         this.log.debug(this.pythonShellClient.command);
-        this.pythonShellClient.on('message', function (envId) {
-            deferred.resolve(envId);
-        });
+        this.onMessage();
+        this.log.debug(`on message`);
         this.monitorError(this.pythonShellClient, deferred);
+        this.log.debug(`monitor submit`);
+        const log = this.log;
+        this.pythonShellClient.on('message', (message) => {
+            const jobid = this.parseContent('job_id', message);
+            if (jobid !== '') {
+                log.debug(`reslove job_id ${jobid}`);
+                deferred.resolve(jobid);
+            }
+        });
         return deferred.promise;
     }
-    stop() {
+    onMessage() {
         if (this.pythonShellClient === undefined) {
             throw Error('python shell client not initialized!');
         }
+        const log = this.log;
+        this.pythonShellClient.on('message', (message) => {
+            const status = this.parseContent('status', message);
+            if (status.length > 0) {
+                log.debug(`on message status: ${status}`);
+                this.status = status;
+                return;
+            }
+        });
+    }
+    stop() {
+        if (this.pythonShellClient === undefined) {
+            this.log.debug(`python shell client not initialized!`);
+            throw Error('python shell client not initialized!');
+        }
+        this.log.debug(`send stop`);
         this.pythonShellClient.send('stop');
     }
     getTrackingUrl() {
@@ -84,14 +113,16 @@ class DlcClient {
         if (this.pythonShellClient === undefined) {
             throw Error('python shell client not initialized!');
         }
+        this.log.debug(`send tracking_url`);
         this.pythonShellClient.send('tracking_url');
+        const log = this.log;
         this.pythonShellClient.on('message', (status) => {
             const trackingUrl = this.parseContent('tracking_url', status);
             if (trackingUrl !== '') {
+                log.debug(`trackingUrl:${trackingUrl}`);
                 deferred.resolve(trackingUrl);
             }
         });
-        this.monitorError(this.pythonShellClient, deferred);
         return deferred.promise;
     }
     updateStatus(oldStatus) {
@@ -100,43 +131,17 @@ class DlcClient {
             throw Error('python shell client not initialized!');
         }
         this.pythonShellClient.send('update_status');
-        this.pythonShellClient.on('message', (status) => {
-            let newStatus = this.parseContent('status', status);
-            if (newStatus === '') {
-                newStatus = oldStatus;
-            }
-            deferred.resolve(newStatus);
-        });
-        this.monitorError(this.pythonShellClient, deferred);
-        return deferred.promise;
-    }
-    sendCommand(message) {
-        if (this.pythonShellClient === undefined) {
-            throw Error('python shell client not initialized!');
+        if (this.status === '') {
+            this.status = oldStatus;
         }
-        this.log.debug(`command:${message}`);
-        this.pythonShellClient.send(`command:${message}`);
-    }
-    receiveCommand() {
-        const deferred = new ts_deferred_1.Deferred();
-        if (this.pythonShellClient === undefined) {
-            throw Error('python shell client not initialized!');
-        }
-        this.pythonShellClient.send('receive');
-        this.pythonShellClient.on('message', (command) => {
-            const message = this.parseContent('receive', command);
-            if (message !== '') {
-                deferred.resolve(JSON.parse(message));
-            }
-        });
-        this.monitorError(this.pythonShellClient, deferred);
+        this.log.debug(`update_status:${this.status}`);
+        deferred.resolve(this.status);
         return deferred.promise;
     }
     monitorError(pythonShellClient, deferred) {
+        const log = this.log;
         pythonShellClient.on('error', function (error) {
-            deferred.reject(error);
-        });
-        pythonShellClient.on('close', function (error) {
+            log.info(`error:${error}`);
             deferred.reject(error);
         });
     }

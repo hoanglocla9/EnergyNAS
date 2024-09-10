@@ -7,7 +7,7 @@ from nas.model import CalibrationModelSpace, MLPSpace, ResNetSpace
 from nas.mutator import MLPMutator, BlockMutator
 import logging, argparse, os
 _logger = logging.getLogger(__name__)
-
+os.environ['PICKLE_SIZE_LIMIT'] = str(10*1024*1024*1024)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Just an example", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     parser.add_argument("-th", "--target_hardware", type=str, help="Target hardware", default="myriadvpu_openvino2019r2")
     parser.add_argument("-bm", "--backbone_model", type=str, help="The base model of NAS", default="mlp")
     
-    thresholds = {"latency": 100}
+    thresholds = {"latency": 5}
 
     args = parser.parse_args()
     cfg = vars(args)
@@ -60,14 +60,7 @@ if __name__ == "__main__":
         else:
             search_strategy = strategy.PolicyBasedRL(max_collect=cfg["trial_number"]//2, trial_per_collect=2)
 
-    if cfg['backbone_model'] == "mlp":
-        applied_mutators = [
-            MLPMutator('mutable_all')
-        ]
-    else:
-        applied_mutators = []
-
-    exp = RetiariiExperiment(model_space, evaluator, applied_mutators, search_strategy)
+    exp = RetiariiExperiment(model_space, evaluator, [], search_strategy)
     exp_config = RetiariiExeConfig('local')
     exp_config.experiment_name = 'mnist_search'
     exp_config.execution_engine = 'base'

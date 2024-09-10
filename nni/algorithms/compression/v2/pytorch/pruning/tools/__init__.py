@@ -9,6 +9,12 @@ from .base import (
     TaskGenerator
 )
 from .data_collector import (
+    TargetDataCollector,
+    EvaluatorBasedTargetDataCollector,
+    EvaluatorBasedHookDataCollector
+)
+# TODO: remove in nni v3.0.
+from .data_collector import (
     WeightDataCollector,
     WeightTrainerBasedDataCollector,
     SingleHookTrainerBasedDataCollector
@@ -16,16 +22,17 @@ from .data_collector import (
 from .metrics_calculator import (
     StraightMetricsCalculator,
     NormMetricsCalculator,
-    MultiDataNormMetricsCalculator,
+    HookDataNormMetricsCalculator,
     DistMetricsCalculator,
     APoZRankMetricsCalculator,
     MeanRankMetricsCalculator
 )
 from .sparsity_allocator import (
     NormalSparsityAllocator,
+    ThresholdSparsityAllocator,
     BankSparsityAllocator,
     GlobalSparsityAllocator,
-    Conv2dDependencyAwareAllocator
+    DependencyAwareAllocator
 )
 from .task_generator import (
     AGPTaskGenerator,

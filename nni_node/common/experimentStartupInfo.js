@@ -3,66 +3,43 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getDispatcherPipe = exports.isReadonly = exports.getPlatform = exports.isNewExperiment = exports.getBasePort = exports.getExperimentId = exports.setExperimentStartupInfo = exports.getExperimentStartupInfo = exports.ExperimentStartupInfo = void 0;
-const strict_1 = __importDefault(require("assert/strict"));
-const path_1 = __importDefault(require("path"));
-let singleton = null;
+exports.isReadonly = exports.getPlatform = exports.isNewExperiment = exports.getBasePort = exports.getExperimentId = exports.getExperimentStartupInfo = exports.ExperimentStartupInfo = void 0;
+const globals_1 = __importDefault(require("common/globals"));
 class ExperimentStartupInfo {
-    experimentId;
-    newExperiment;
-    basePort;
-    logDir = '';
-    logLevel;
-    readonly;
-    dispatcherPipe;
-    platform;
-    urlprefix;
-    constructor(args) {
-        this.experimentId = args.experimentId;
-        this.newExperiment = (args.action === 'create');
-        this.basePort = args.port;
-        this.logDir = path_1.default.join(args.experimentsDirectory, args.experimentId);
-        this.logLevel = args.logLevel;
-        this.readonly = (args.action === 'view');
-        this.dispatcherPipe = args.dispatcherPipe ?? null;
-        this.platform = args.mode;
-        this.urlprefix = args.urlPrefix;
-    }
+    experimentId = globals_1.default.args.experimentId;
+    newExperiment = (globals_1.default.args.action === 'create');
+    basePort = globals_1.default.args.port;
+    logDir = globals_1.default.paths.experimentRoot;
+    logLevel = globals_1.default.args.logLevel;
+    readonly = (globals_1.default.args.action === 'view');
+    platform = globals_1.default.args.mode;
+    urlprefix = globals_1.default.args.urlPrefix;
     static getInstance() {
-        strict_1.default.notEqual(singleton, null);
-        return singleton;
+        return new ExperimentStartupInfo();
     }
 }
 exports.ExperimentStartupInfo = ExperimentStartupInfo;
 function getExperimentStartupInfo() {
-    return ExperimentStartupInfo.getInstance();
+    return new ExperimentStartupInfo();
 }
 exports.getExperimentStartupInfo = getExperimentStartupInfo;
-function setExperimentStartupInfo(args) {
-    singleton = new ExperimentStartupInfo(args);
-}
-exports.setExperimentStartupInfo = setExperimentStartupInfo;
 function getExperimentId() {
-    return getExperimentStartupInfo().experimentId;
+    return globals_1.default.args.experimentId;
 }
 exports.getExperimentId = getExperimentId;
 function getBasePort() {
-    return getExperimentStartupInfo().basePort;
+    return globals_1.default.args.port;
 }
 exports.getBasePort = getBasePort;
 function isNewExperiment() {
-    return getExperimentStartupInfo().newExperiment;
+    return globals_1.default.args.action === 'create';
 }
 exports.isNewExperiment = isNewExperiment;
 function getPlatform() {
-    return getExperimentStartupInfo().platform;
+    return globals_1.default.args.mode;
 }
 exports.getPlatform = getPlatform;
 function isReadonly() {
-    return getExperimentStartupInfo().readonly;
+    return globals_1.default.args.action === 'view';
 }
 exports.isReadonly = isReadonly;
-function getDispatcherPipe() {
-    return getExperimentStartupInfo().dispatcherPipe;
-}
-exports.getDispatcherPipe = getDispatcherPipe;

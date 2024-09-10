@@ -4,7 +4,7 @@
 from copy import deepcopy
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 import json_tricks
 
 import numpy as np
@@ -25,7 +25,8 @@ _logger = logging.getLogger(__name__)
 
 class FunctionBasedTaskGenerator(TaskGenerator):
     def __init__(self, total_iteration: int, origin_model: Module, origin_config_list: List[Dict],
-                 origin_masks: Dict[str, Dict[str, Tensor]] = {}, log_dir: str = '.', keep_intermediate_result: bool = False):
+                 origin_masks: Dict[str, Dict[str, Tensor]] = {}, log_dir: str = '.', keep_intermediate_result: bool = False,
+                 skip_first_iteration: bool = False):
         """
         Parameters
         ----------
@@ -39,16 +40,21 @@ class FunctionBasedTaskGenerator(TaskGenerator):
         origin_masks
             The pre masks on the origin model. This mask maybe user-defined or maybe generate by previous pruning.
         log_dir
-            The log directory use to saving the task generator log.
+            The log directory used to save the task generator log.
         keep_intermediate_result
             If keeping the intermediate result, including intermediate model and masks during each iteration.
+        skip_first_iteration
+            If skipping the first iteration, the iteration counter will start at 1.
+            In these function-based iterative pruning algorithms, iteration `0` means a warm up stage with `sparsity = 0`.
+            If the `original_model` is a pre-trained model, the first iteration is usually can be skipped.
         """
         self.total_iteration = total_iteration
+        self.skip_first_iteration = skip_first_iteration
         super().__init__(origin_model, origin_config_list=origin_config_list, origin_masks=origin_masks,
-                         log_dir=log_dir, keep_intermediate_result=keep_intermediate_result)
+                         log_dir=log_dir, keep_intermediate_result=keep_intermediate_result, best_result_mode='latest')
 
     def reset(self, model: Module, config_list: List[Dict] = [], masks: Dict[str, Dict[str, Tensor]] = {}):
-        self.current_iteration = 0
+        self.current_iteration = 1 if self.skip_first_iteration else 0
         self.target_sparsity = config_list_canonical(model, config_list)
         super().reset(model, config_list=config_list, masks=masks)
 
@@ -72,10 +78,14 @@ class FunctionBasedTaskGenerator(TaskGenerator):
 
         # get current2origin_sparsity and compact2origin_sparsity
         origin_model = torch.load(self._origin_model_path)
-        current2origin_sparsity, compact2origin_sparsity, _ = compute_sparsity(origin_model, compact_model, compact_model_masks, self.target_sparsity)
-        _logger.debug('\nTask %s total real sparsity compared with original model is:\n%s', str(task_result.task_id), json_tricks.dumps(current2origin_sparsity, indent=4))
+        current2origin_sparsity, compact2origin_sparsity, _ = compute_sparsity(origin_model, compact_model, compact_model_masks,
+                                                                               self.target_sparsity)
+        debug_msg = f'\nTask {task_result.task_id} total real sparsity compared with original model is:\n' + \
+                    f'{json_tricks.dumps(current2origin_sparsity, indent=4)}'
+        _logger.debug(debug_msg)
         if task_result.task_id != 'origin':
-            self._tasks[task_result.task_id].state['current2origin_sparsity'] = current2origin_sparsity
+            task = self._tasks[task_result.task_id]
+            task.state['current2origin_sparsity'] = current2origin_sparsity
 
         # if reach the total_iteration, no more task will be generated
         if self.current_iteration > self.total_iteration:
@@ -88,7 +98,7 @@ class FunctionBasedTaskGenerator(TaskGenerator):
 
         with Path(config_list_path).open('w') as f:
             json_tricks.dump(new_config_list, f, indent=4)
-        task = Task(task_id, model_path, masks_path, config_list_path)
+        task = Task(task_id, model_path, masks_path, config_list_path, speedup=True, finetune=True, evaluate=False)
 
         self._tasks[task_id] = task
 
@@ -110,7 +120,8 @@ class AGPTaskGenerator(FunctionBasedTaskGenerator):
         for target, mo in zip(target_sparsity, compact2origin_sparsity):
             ori_sparsity = (1 - (1 - iteration / self.total_iteration) ** 3) * target['total_sparsity']
             sparsity = max(0.0, (ori_sparsity - mo['total_sparsity']) / (1 - mo['total_sparsity']))
-            assert 0 <= sparsity <= 1, 'sparsity: {}, ori_sparsity: {}, model_sparsity: {}'.format(sparsity, ori_sparsity, mo['total_sparsity'])
+            err_msg = 'sparsity: {}, ori_sparsity: {}, model_sparsity: {}'.format(sparsity, ori_sparsity, mo['total_sparsity'])
+            assert 0 <= sparsity <= 1, err_msg
             config_list.append(deepcopy(target))
             config_list[-1]['total_sparsity'] = sparsity
         return config_list
@@ -122,7 +133,8 @@ class LinearTaskGenerator(FunctionBasedTaskGenerator):
         for target, mo in zip(target_sparsity, compact2origin_sparsity):
             ori_sparsity = iteration / self.total_iteration * target['total_sparsity']
             sparsity = max(0.0, (ori_sparsity - mo['total_sparsity']) / (1 - mo['total_sparsity']))
-            assert 0 <= sparsity <= 1, 'sparsity: {}, ori_sparsity: {}, model_sparsity: {}'.format(sparsity, ori_sparsity, mo['total_sparsity'])
+            err_msg = 'sparsity: {}, ori_sparsity: {}, model_sparsity: {}'.format(sparsity, ori_sparsity, mo['total_sparsity'])
+            assert 0 <= sparsity <= 1, err_msg
             config_list.append(deepcopy(target))
             config_list[-1]['total_sparsity'] = sparsity
         return config_list
@@ -143,16 +155,18 @@ class LotteryTicketTaskGenerator(FunctionBasedTaskGenerator):
             # The following is the formula in paper.
             # ori_sparsity = (target['total_sparsity'] * 100) ** (iteration / self.total_iteration) / 100
             sparsity = max(0.0, (ori_sparsity - mo['total_sparsity']) / (1 - mo['total_sparsity']))
-            assert 0 <= sparsity <= 1, 'sparsity: {}, ori_sparsity: {}, model_sparsity: {}'.format(sparsity, ori_sparsity, mo['total_sparsity'])
+            err_msg = 'sparsity: {}, ori_sparsity: {}, model_sparsity: {}'.format(sparsity, ori_sparsity, mo['total_sparsity'])
+            assert 0 <= sparsity <= 1, err_msg
             config_list.append(deepcopy(target))
             config_list[-1]['total_sparsity'] = sparsity
         return config_list
 
 
 class SimulatedAnnealingTaskGenerator(TaskGenerator):
-    def __init__(self, origin_model: Module, origin_config_list: List[Dict], origin_masks: Dict[str, Dict[str, Tensor]] = {},
-                 start_temperature: float = 100, stop_temperature: float = 20, cool_down_rate: float = 0.9,
-                 perturbation_magnitude: float = 0.35, log_dir: str = '.', keep_intermediate_result: bool = False):
+    def __init__(self, origin_model: Optional[Module], origin_config_list: Optional[List[Dict]],
+                 origin_masks: Dict[str, Dict[str, Tensor]] = {}, start_temperature: float = 100, stop_temperature: float = 20,
+                 cool_down_rate: float = 0.9, perturbation_magnitude: float = 0.35, log_dir: Union[str, Path] = '.',
+                 keep_intermediate_result: bool = False):
         """
         Parameters
         ----------
@@ -182,7 +196,7 @@ class SimulatedAnnealingTaskGenerator(TaskGenerator):
         self.perturbation_magnitude = perturbation_magnitude
 
         super().__init__(origin_model, origin_masks=origin_masks, origin_config_list=origin_config_list,
-                         log_dir=log_dir, keep_intermediate_result=keep_intermediate_result)
+                         log_dir=log_dir, keep_intermediate_result=keep_intermediate_result, best_result_mode='maximize')
 
     def reset(self, model: Module, config_list: List[Dict] = [], masks: Dict[str, Dict[str, Tensor]] = {}):
         self.current_temperature = self.start_temperature
@@ -190,15 +204,18 @@ class SimulatedAnnealingTaskGenerator(TaskGenerator):
         # TODO: replace with validation here
         for config in config_list:
             if 'sparsity' in config or 'sparsity_per_layer' in config:
-                _logger.warning('Only `total_sparsity` can be differentially allocated sparse ratio to each layer, `sparsity` or `sparsity_per_layer` will allocate fixed sparse ratio to layers. Make sure you know what this will lead to, otherwise please use `total_sparsity`.')
+                warn_msg = 'Only `total_sparsity` can be differentially allocated sparse ratio to each layer, ' + \
+                           '`sparsity` or `sparsity_per_layer` will allocate fixed sparse ratio to layers. ' + \
+                           'Make sure you know what this will lead to, otherwise please use `total_sparsity`.'
+                _logger.warning(warn_msg)
 
         self.weights_numel, self.masked_rate = get_model_weights_numel(model, config_list, masks)
         self.target_sparsity_list = config_list_canonical(model, config_list)
         self._adjust_target_sparsity()
 
-        self._temp_config_list = None
-        self._current_sparsity_list = None
-        self._current_score = None
+        self._temp_config_list = []
+        self._current_sparsity_list = []
+        self._current_score = 0.
 
         super().reset(model, config_list=config_list, masks=masks)
 
@@ -248,26 +265,23 @@ class SimulatedAnnealingTaskGenerator(TaskGenerator):
 
         return self._sparsity_to_config_list(rescaled_sparsity, config), rescaled_sparsity
 
-    def _rescale_sparsity(self, random_sparsity: List, target_sparsity: float, op_names: List) -> List:
+    def _rescale_sparsity(self, random_sparsity: List, target_sparsity: float, op_names: List) -> Optional[List]:
         assert len(random_sparsity) == len(op_names)
 
         num_weights = sorted([self.weights_numel[op_name] for op_name in op_names])
         sparsity = sorted(random_sparsity)
 
-        total_weights = 0
-        total_weights_pruned = 0
-
         # calculate the scale
-        for idx, num_weight in enumerate(num_weights):
-            total_weights += num_weight
-            total_weights_pruned += int(num_weight * sparsity[idx])
+        total_weights = np.sum(num_weights)
+        total_weights_pruned = np.sum([int(num_weight * sparsity[idx]) for idx, num_weight in enumerate(num_weights)])
+
         if total_weights_pruned == 0:
             return None
 
         scale = target_sparsity / (total_weights_pruned / total_weights)
 
         # rescale the sparsity
-        sparsity = np.asarray(sparsity) * scale
+        sparsity = list(np.asarray(sparsity) * scale)
         return sparsity
 
     def _sparsity_to_config_list(self, sparsity: List, config: Dict) -> List[Dict]:
@@ -285,7 +299,7 @@ class SimulatedAnnealingTaskGenerator(TaskGenerator):
         # decrease magnitude with current temperature
         magnitude = self.current_temperature / self.start_temperature * self.perturbation_magnitude
         for config, current_sparsity in zip(self.target_sparsity_list, self._current_sparsity_list):
-            if len(current_sparsity) == 0:
+            if not current_sparsity:
                 sub_temp_config_list = [deepcopy(config) for i in range(len(config['op_names']))]
                 for temp_config, op_name in zip(sub_temp_config_list, config['op_names']):
                     temp_config.update({'total_sparsity': 0, 'op_names': [op_name]})
@@ -327,11 +341,12 @@ class SimulatedAnnealingTaskGenerator(TaskGenerator):
 
     def generate_tasks(self, task_result: TaskResult) -> List[Task]:
         # initial/update temp config list
-        if self._temp_config_list is None:
+        if not self._temp_config_list:
             self._init_temp_config_list()
         else:
             score = self._tasks[task_result.task_id].score
-            if self._current_sparsity_list is None:
+            assert score is not None, 'SimulatedAnnealingTaskGenerator need each score is not None.'
+            if not self._current_sparsity_list:
                 self._current_sparsity_list = deepcopy(self._temp_sparsity_list)
                 self._current_score = score
             else:

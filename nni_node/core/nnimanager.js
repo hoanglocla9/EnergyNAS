@@ -29,18 +29,17 @@ const component = __importStar(require("../common/component"));
 const datastore_1 = require("../common/datastore");
 const errors_1 = require("../common/errors");
 const experimentStartupInfo_1 = require("../common/experimentStartupInfo");
+const globals_1 = __importDefault(require("common/globals"));
 const log_1 = require("../common/log");
 const experimentConfig_1 = require("../common/experimentConfig");
-const experimentManager_1 = require("../common/experimentManager");
+const experiments_manager_1 = require("extensions/experiments_manager");
 const tensorboardManager_1 = require("../common/tensorboardManager");
 const utils_1 = require("../common/utils");
 const commands_1 = require("./commands");
 const ipcInterface_1 = require("./ipcInterface");
-const rest_server_1 = require("../rest_server");
 class NNIManager {
     trainingService;
     dispatcher;
-    experimentManager;
     currSubmittedTrialNum;
     trialConcurrencyChange;
     log;
@@ -57,7 +56,6 @@ class NNIManager {
     constructor() {
         this.currSubmittedTrialNum = 0;
         this.trialConcurrencyChange = 0;
-        this.experimentManager = component.get(experimentManager_1.ExperimentManager);
         this.dispatcherPid = 0;
         this.waitingTrials = [];
         this.trialJobs = new Map();
@@ -74,10 +72,7 @@ class NNIManager {
                 this.criticalError(errors_1.NNIError.FromError(err, 'Job metrics error: '));
             });
         };
-        const pipe = experimentStartupInfo_1.getDispatcherPipe();
-        if (pipe !== null) {
-            this.dispatcher = ipcInterface_1.createDispatcherPipeInterface(pipe);
-        }
+        globals_1.default.shutdown.register('NniManager', this.stopExperiment.bind(this));
     }
     updateExperimentProfile(experimentProfile, updateType) {
         if (this.readonly) {
@@ -170,7 +165,7 @@ class NNIManager {
         const dispatcherCommand = utils_1.getMsgDispatcherCommand(config);
         this.log.debug(`dispatcher command: ${dispatcherCommand}`);
         const checkpointDir = await this.createCheckpointDir();
-        this.setupTuner(dispatcherCommand, undefined, 'start', checkpointDir);
+        await this.setupTuner(dispatcherCommand, undefined, 'start', checkpointDir);
         this.setStatus('RUNNING');
         await this.storeExperimentProfile();
         this.run().catch((err) => {
@@ -197,7 +192,7 @@ class NNIManager {
         const dispatcherCommand = utils_1.getMsgDispatcherCommand(config);
         this.log.debug(`dispatcher command: ${dispatcherCommand}`);
         const checkpointDir = await this.createCheckpointDir();
-        this.setupTuner(dispatcherCommand, undefined, 'resume', checkpointDir);
+        await this.setupTuner(dispatcherCommand, undefined, 'resume', checkpointDir);
         const allTrialJobs = await this.dataStore.listTrialJobs();
         this.currSubmittedTrialNum = allTrialJobs.length;
         await Promise.all(allTrialJobs
@@ -266,8 +261,8 @@ class NNIManager {
             return;
         }
         this.trainingService.removeTrialJobMetricListener(this.trialJobMetricListener);
+        this.dispatcher.sendCommand(commands_1.TERMINATE);
         if (this.dispatcherPid > 0) {
-            this.dispatcher.sendCommand(commands_1.TERMINATE);
             for (let i = 0; i < 30; i++) {
                 if (!await utils_1.isAlive(this.dispatcherPid)) {
                     break;
@@ -304,21 +299,8 @@ class NNIManager {
         await this.storeExperimentProfile();
         this.setStatus('STOPPED');
         this.log.info('Experiment stopped.');
-        let hasError = false;
-        try {
-            await this.experimentManager.stop();
-            await component.get(tensorboardManager_1.TensorboardManager).stop();
-            await this.dataStore.close();
-            await component.get(rest_server_1.RestServer).shutdown();
-        }
-        catch (err) {
-            hasError = true;
-            this.log.error(`${err.stack}`);
-        }
-        finally {
-            log_1.stopLogging();
-            process.exit(hasError ? 1 : 0);
-        }
+        await component.get(tensorboardManager_1.TensorboardManager).stop();
+        await this.dataStore.close();
     }
     async getMetricData(trialJobId, metricType) {
         return this.dataStore.getMetricData(trialJobId, metricType);
@@ -413,11 +395,23 @@ class NNIManager {
             return await module_.RouterTrainingService.construct(config);
         }
     }
-    setupTuner(command, cwd, mode, dataDirectory) {
+    async setupTuner(command, cwd, mode, dataDirectory) {
         if (this.dispatcher !== undefined) {
             return;
         }
-        const stdio = ['ignore', process.stdout, process.stderr, 'pipe', 'pipe'];
+        let tunerWs;
+        if (globals_1.default.args.urlPrefix) {
+            tunerWs = `ws://localhost:${globals_1.default.args.port}/${globals_1.default.args.urlPrefix}/tuner`;
+        }
+        else {
+            tunerWs = `ws://localhost:${globals_1.default.args.port}/tuner`;
+        }
+        if (globals_1.default.args.tunerCommandChannel) {
+            assert_1.default.equal(tunerWs, globals_1.default.args.tunerCommandChannel);
+            this.dispatcher = await ipcInterface_1.createDispatcherInterface();
+            return;
+        }
+        const stdio = ['ignore', process.stdout, process.stderr];
         let newCwd;
         if (cwd === undefined || cwd === '') {
             newCwd = utils_1.getLogDir();
@@ -433,12 +427,13 @@ class NNIManager {
             NNI_LOG_DIRECTORY: utils_1.getLogDir(),
             NNI_LOG_LEVEL: utils_1.getLogLevel(),
             NNI_INCLUDE_INTERMEDIATE_RESULTS: includeIntermediateResultsEnv,
+            NNI_TUNER_COMMAND_CHANNEL: tunerWs,
             CUDA_VISIBLE_DEVICES: experimentConfig_1.toCudaVisibleDevices(this.experimentProfile.params.tunerGpuIndices)
         };
         const newEnv = Object.assign({}, process.env, nniEnv);
         const tunerProc = utils_1.getTunerProc(command, stdio, newCwd, newEnv);
         this.dispatcherPid = tunerProc.pid;
-        this.dispatcher = ipcInterface_1.createDispatcherInterface(tunerProc);
+        this.dispatcher = await ipcInterface_1.createDispatcherInterface();
         return;
     }
     updateTrialConcurrency(trialConcurrency) {
@@ -620,6 +615,7 @@ class NNIManager {
     }
     async run() {
         assert_1.default(this.dispatcher !== undefined);
+        await this.dispatcher.init();
         this.addEventListeners();
         this.sendInitTunerCommands();
         await Promise.all([
@@ -756,10 +752,15 @@ class NNIManager {
         console.error(err);
     }
     logError(err) {
-        if (err.stack !== undefined) {
-            this.log.error(err.stack);
+        if (err !== undefined) {
+            if (err.stack !== undefined) {
+                this.log.error(err.stack);
+                this.status.errors.push(err.message);
+            }
+            else {
+                this.status.errors.push(`Undefined error, stack: ${new Error().stack}`);
+            }
         }
-        this.status.errors.push(err.message);
         this.setEndtime();
         this.setStatus('ERROR');
     }
@@ -767,12 +768,12 @@ class NNIManager {
         if (status !== this.status.status) {
             this.log.info(`Change NNIManager status from: ${this.status.status} to: ${status}`);
             this.status.status = status;
-            this.experimentManager.setExperimentInfo(this.experimentProfile.id, 'status', this.status.status);
+            experiments_manager_1.getExperimentsManager().setExperimentInfo(this.experimentProfile.id, 'status', this.status.status);
         }
     }
     setEndtime() {
         this.experimentProfile.endTime = Date.now();
-        this.experimentManager.setExperimentInfo(this.experimentProfile.id, 'endTime', this.experimentProfile.endTime);
+        experiments_manager_1.getExperimentsManager().setExperimentInfo(this.experimentProfile.id, 'endTime', this.experimentProfile.endTime);
     }
     async createCheckpointDir() {
         const chkpDir = utils_1.getCheckpointDir();

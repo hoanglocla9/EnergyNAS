@@ -9,13 +9,14 @@ from sklearn.model_selection import KFold
 from .estimator import  HardwareMetricEstimator
 from torchmetrics.regression import MeanAbsolutePercentageError
 
+@nni.trace
 def latency_reward_component(latency, target_latency):
     alpha, beta = -0.07, -0.07 # as in the paper  https://openaccess.thecvf.com/content_CVPR_2019/papers/Tan_MnasNet_Platform-Aware_Neural_Architecture_Search_for_Mobile_CVPR_2019_paper.pdf
     if latency < target_latency:
         return (latency * 1.0 /target_latency * 1.0) ** alpha
     else:
         return (latency * 1.0 /target_latency * 1.0) ** beta
-
+@nni.trace
 def reward_function(accuracy, latency, target_latency):
     latency_component = latency_reward_component(latency, target_latency)
     # normalized_accuracy = (accuracy - 0.35) / ( 8-0.35)
@@ -49,17 +50,17 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
         hardware_estimated_result = estimator.estimate(model_cls())
 
     k_folds = 3
-    kfold = KFold(n_splits=k_folds, shuffle=True)
+    kfold = nni.trace(KFold)(n_splits=k_folds, shuffle=True)
     dataset = nni.trace(MISO_Data_v1)(lag_range, target)
-    criterion = torch.nn.L1Loss()
-    acc_fn = MeanAbsolutePercentageError()## torch.nn.MSELoss()
+    criterion = nni.trace(torch.nn.L1Loss())
+    acc_fn = nni.trace(MeanAbsolutePercentageError())## torch.nn.MSELoss()
 
     average_loss = 0.0
     average_min = 0.0
 
     for fold, (train_ids, valid_ids) in enumerate(kfold.split(dataset)):
-        train_subsampler = SubsetRandomSampler(train_ids, torch.Generator().manual_seed(42))
-        valid_subsampler = SubsetRandomSampler(valid_ids, torch.Generator().manual_seed(42))
+        train_subsampler = nni.trace(SubsetRandomSampler)(train_ids, torch.Generator().manual_seed(42))
+        valid_subsampler = nni.trace(SubsetRandomSampler)(valid_ids, torch.Generator().manual_seed(42))
 
         train_loader = nni.trace(DataLoader)(dataset, batch_size=512, sampler=train_subsampler)
         valid_loader = nni.trace(DataLoader)(dataset, batch_size=512, sampler=valid_subsampler)

@@ -116,11 +116,15 @@ class AMLClient {
         return deferred.promise;
     }
     monitorError(pythonShellClient, deferred) {
+        pythonShellClient.on('stderr', function (chunk) {
+            console.error(`Python process stderr: ${chunk}`);
+        });
         pythonShellClient.on('error', function (error) {
+            console.error(`Python process fires error: ${error}`);
             deferred.reject(error);
         });
-        pythonShellClient.on('close', function (error) {
-            deferred.reject(error);
+        pythonShellClient.on('close', function () {
+            deferred.reject(new Error('AML client Python process unknown error.'));
         });
     }
     parseContent(head, command) {

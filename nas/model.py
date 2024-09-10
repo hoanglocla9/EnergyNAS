@@ -61,32 +61,39 @@ def reset_weights(m):
 
 @nni.retiarii.model_wrapper
 class MLPSpace(nn.Module):
+    @nni.trace
+    class MLPBlock(nn.Module):
+        def __init__(self, d_in, d_hidden, idx=-1):
+            self.linear = nn.Linear(d_in, d_hidden)
+            self.activation = nn.ReLU()
+            if idx == -1:
+                idx = "final"
+            self.dropout = nn.Dropout(p=nn.ValueChoice([0.1, 0.2, 0.4, 0.6, 0.8, 0.9], label="mlpblock_" + str(idx) + "_droprate"))
+        def forward(self, x):
+            x = self.linear(x)
+            x = self.activation(x)
+            x = self.dropout(x)
+            return x 
+        
     def __init__(self, n_features=33): # , 
         super().__init__()
         layers = []
         self.n_features = n_features
+        d_hidden = nn.ValueChoice(range(4, 1025, 4), label="d_hidden")
+        self.blocks = nn.Repeat(lambda idx: MLPSpace.MLPBlock(n_features, d_hidden, idx) if idx == 0 \
+                                        else MLPSpace.MLPBlock(d_hidden, d_hidden, idx), label="n_mlpblocks")
         
-        _layers = nn.Placeholder(
-            label='mutable_all',
-            n_input_features=n_features,
-            n_neurons_option=range(4, 4097, 4),
-            fc_n_layer_option=range(2, 10),
-            dropout_option=[0.0, 0.2, 0.4, 0.6, 0.8, 0.9],
-            fc_activation_fn_option=get_activation_name_options()
-        )
-        layers.append(_layers)
-        self.layers = nn.Sequential(*layers)
+        self.final_block = MLPSpace.MLPBlock(d_hidden, 1)
                 
     def forward(self, x):
-        return self.layers(x)
+        x = self.blocks(x)
+        x = self.final_block(x)
+        return x
     
-def reset_weights(m):
-    for layer in m.children():
-        if hasattr(layer, 'reset_parameters'):
-            layer.reset_parameters()
 
 @nni.retiarii.model_wrapper
 class ResNetSpace(nn.Module):
+    @nni.trace
     class ResNetBlock(nn.Module):
         def __init__(self, idx, d_in=33):
             super().__init__()
@@ -110,7 +117,7 @@ class ResNetSpace(nn.Module):
             x = self.linear_2(x)
             x = self.dropout_2(x)
             return x_input + x 
-
+    @nni.trace
     class ResNetHead(nn.Module):
         def __init__(self, d_in, d_out):
             super().__init__()

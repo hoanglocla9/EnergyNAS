@@ -29,22 +29,19 @@ const component = __importStar(require("../common/component"));
 const datastore_1 = require("../common/datastore");
 const errors_1 = require("../common/errors");
 const experimentStartupInfo_1 = require("../common/experimentStartupInfo");
+const globals_1 = __importDefault(require("common/globals"));
 const log_1 = require("../common/log");
 const manager_1 = require("../common/manager");
-const experimentManager_1 = require("../common/experimentManager");
+const experiments_manager_1 = require("extensions/experiments_manager");
 const tensorboardManager_1 = require("../common/tensorboardManager");
 const utils_1 = require("../common/utils");
 class NNIRestHandler {
-    stopCallback;
     nniManager;
-    experimentsManager;
     tensorboardManager;
     log;
-    constructor(stopCallback) {
+    constructor() {
         this.nniManager = component.get(manager_1.Manager);
-        this.experimentsManager = component.get(experimentManager_1.ExperimentManager);
         this.tensorboardManager = component.get(tensorboardManager_1.TensorboardManager);
-        this.stopCallback = stopCallback;
         this.log = log_1.getLogger('NNIRestHandler');
     }
     createRestHandler() {
@@ -102,7 +99,7 @@ class NNIRestHandler {
             error: err.message
         });
         if (isFatal) {
-            this.log.fatal(err);
+            this.log.critical(err);
             process.exit(1);
         }
         else {
@@ -124,7 +121,7 @@ class NNIRestHandler {
                 this.handleError(err, res);
                 this.log.error(err.message);
                 this.log.error(`Datastore initialize failed, stopping rest server...`);
-                await this.stopCallback();
+                globals_1.default.shutdown.criticalError('RestHandler', err);
             });
         });
     }
@@ -309,7 +306,7 @@ class NNIRestHandler {
         router.get('/experiment-metadata', (_req, res) => {
             Promise.all([
                 this.nniManager.getExperimentProfile(),
-                this.experimentsManager.getExperimentsInfo()
+                experiments_manager_1.getExperimentsManager().getExperimentsInfo()
             ]).then(([profile, experimentInfo]) => {
                 for (const info of experimentInfo) {
                     if (info.id === profile.id) {
@@ -324,7 +321,7 @@ class NNIRestHandler {
     }
     getExperimentsInfo(router) {
         router.get('/experiments-info', (_req, res) => {
-            this.experimentsManager.getExperimentsInfo().then((experimentInfo) => {
+            experiments_manager_1.getExperimentsManager().getExperimentsInfo().then((experimentInfo) => {
                 res.send(JSON.stringify(experimentInfo));
             }).catch((err) => {
                 this.handleError(err, res);
@@ -388,10 +385,8 @@ class NNIRestHandler {
     }
     stop(router) {
         router.delete('/experiment', (_req, res) => {
-            this.nniManager.stopExperimentTopHalf().then(() => {
-                res.send();
-                this.nniManager.stopExperimentBottomHalf();
-            });
+            res.send();
+            globals_1.default.shutdown.initiate('REST request');
         });
     }
     setErrorPathForFailedJob(jobInfo) {
@@ -402,8 +397,7 @@ class NNIRestHandler {
         return jobInfo;
     }
 }
-function createRestHandler(stopCallback) {
-    const handler = new NNIRestHandler(stopCallback);
-    return handler.createRestHandler();
+function createRestHandler() {
+    return new NNIRestHandler().createRestHandler();
 }
 exports.createRestHandler = createRestHandler;

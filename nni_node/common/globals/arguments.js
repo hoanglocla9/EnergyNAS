@@ -14,9 +14,6 @@ function parseArgs(rawArgs) {
         argsAsAny[key] = parsedArgs[key];
         strict_1.default(!Number.isNaN(argsAsAny[key]), `Command line arg --${key} is not a number`);
     }
-    if (argsAsAny.dispatcherPipe === '') {
-        argsAsAny.dispatcherPipe = undefined;
-    }
     const args = argsAsAny;
     const prefixErrMsg = `Command line arg --url-prefix "${args.urlPrefix}" is not stripped`;
     strict_1.default(!args.urlPrefix.startsWith('/') && !args.urlPrefix.endsWith('/'), prefixErrMsg);
@@ -52,11 +49,15 @@ const yargsOptions = {
         default: '',
         type: 'string'
     },
-    mode: {
-        default: '',
+    tunerCommandChannel: {
+        default: null,
         type: 'string'
     },
-    dispatcherPipe: {
+    pythonInterpreter: {
+        demandOption: true,
+        type: 'string'
+    },
+    mode: {
         default: '',
         type: 'string'
     }

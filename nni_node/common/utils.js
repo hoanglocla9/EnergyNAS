@@ -22,7 +22,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getNewLine = exports.killPid = exports.isAlive = exports.getTunerProc = exports.getCmdPy = exports.getVersion = exports.getLogLevel = exports.randomSelect = exports.randomInt = exports.uniqueString = exports.cleanupUnitTest = exports.prepareUnitTest = exports.delay = exports.mkDirPSync = exports.mkDirP = exports.isPortOpen = exports.getFreePort = exports.withLockSync = exports.unixPathJoin = exports.getIPV4Address = exports.getDefaultDatabaseDir = exports.getJobCancelStatus = exports.getExperimentRootDir = exports.getLogDir = exports.getExperimentsInfoPath = exports.getCheckpointDir = exports.getMsgDispatcherCommand = exports.generateParamFileName = exports.countFilesRecursively = exports.importModule = void 0;
+exports.getNewLine = exports.killPid = exports.isAlive = exports.getTunerProc = exports.getVersion = exports.getLogLevel = exports.randomSelect = exports.randomInt = exports.uniqueString = exports.cleanupUnitTest = exports.prepareUnitTest = exports.delay = exports.mkDirPSync = exports.mkDirP = exports.isPortOpen = exports.getFreePort = exports.unixPathJoin = exports.getIPV4Address = exports.getDefaultDatabaseDir = exports.getJobCancelStatus = exports.getExperimentRootDir = exports.getLogDir = exports.getCheckpointDir = exports.getMsgDispatcherCommand = exports.generateParamFileName = exports.countFilesRecursively = exports.importModule = void 0;
 const assert_1 = __importDefault(require("assert"));
 const crypto_1 = require("crypto");
 const child_process_promise_1 = __importDefault(require("child-process-promise"));
@@ -31,28 +31,25 @@ const child_process_2 = require("child_process");
 const dgram_1 = __importDefault(require("dgram"));
 const fs_1 = __importDefault(require("fs"));
 const net_1 = __importDefault(require("net"));
-const os_1 = __importDefault(require("os"));
 const path_1 = __importDefault(require("path"));
 const timersPromises = __importStar(require("timers/promises"));
-const lockfile_1 = __importDefault(require("lockfile"));
 const ts_deferred_1 = require("ts-deferred");
 const typescript_ioc_1 = require("typescript-ioc");
-const glob_1 = __importDefault(require("glob"));
 const datastore_1 = require("./datastore");
-const experimentStartupInfo_1 = require("./experimentStartupInfo");
+const globals_1 = __importDefault(require("./globals"));
+const unittest_1 = require("./globals/unittest");
 const manager_1 = require("./manager");
-const experimentManager_1 = require("./experimentManager");
 const trainingService_1 = require("./trainingService");
 function getExperimentRootDir() {
-    return experimentStartupInfo_1.getExperimentStartupInfo().logDir;
+    return globals_1.default.paths.experimentRoot;
 }
 exports.getExperimentRootDir = getExperimentRootDir;
 function getLogDir() {
-    return path_1.default.join(getExperimentRootDir(), 'log');
+    return globals_1.default.paths.logDirectory;
 }
 exports.getLogDir = getLogDir;
 function getLogLevel() {
-    return experimentStartupInfo_1.getExperimentStartupInfo().logLevel;
+    return globals_1.default.args.logLevel;
 }
 exports.getLogLevel = getLogLevel;
 function getDefaultDatabaseDir() {
@@ -63,10 +60,6 @@ function getCheckpointDir() {
     return path_1.default.join(getExperimentRootDir(), 'checkpoint');
 }
 exports.getCheckpointDir = getCheckpointDir;
-function getExperimentsInfoPath() {
-    return path_1.default.join(os_1.default.homedir(), 'nni-experiments', '.experiment');
-}
-exports.getExperimentsInfoPath = getExperimentsInfoPath;
 async function mkDirP(dirPath) {
     await fs_1.default.promises.mkdir(dirPath, { recursive: true });
 }
@@ -113,18 +106,10 @@ function randomSelect(a) {
     return a[Math.floor(Math.random() * a.length)];
 }
 exports.randomSelect = randomSelect;
-function getCmdPy() {
-    let cmd = 'python3';
-    if (process.platform === 'win32') {
-        cmd = 'python';
-    }
-    return cmd;
-}
-exports.getCmdPy = getCmdPy;
 function getMsgDispatcherCommand(expParams) {
     const clonedParams = Object.assign({}, expParams);
     delete clonedParams.searchSpace;
-    return `${getCmdPy()} -m nni --exp_params ${Buffer.from(JSON.stringify(clonedParams)).toString('base64')}`;
+    return [globals_1.default.args.pythonInterpreter, '-m', 'nni', '--exp_params', Buffer.from(JSON.stringify(clonedParams)).toString('base64')];
 }
 exports.getMsgDispatcherCommand = getMsgDispatcherCommand;
 function generateParamFileName(hyperParameters) {
@@ -145,19 +130,7 @@ function prepareUnitTest() {
     typescript_ioc_1.Container.snapshot(datastore_1.DataStore);
     typescript_ioc_1.Container.snapshot(trainingService_1.TrainingService);
     typescript_ioc_1.Container.snapshot(manager_1.Manager);
-    typescript_ioc_1.Container.snapshot(experimentManager_1.ExperimentManager);
-    experimentStartupInfo_1.setExperimentStartupInfo({
-        port: 8080,
-        experimentId: 'unittest',
-        action: 'create',
-        experimentsDirectory: path_1.default.join(os_1.default.homedir(), 'nni-experiments'),
-        logLevel: 'info',
-        foreground: false,
-        urlPrefix: '',
-        mode: 'unittest',
-        dispatcherPipe: undefined,
-    });
-    mkDirPSync(getLogDir());
+    unittest_1.resetGlobals();
     const sqliteFile = path_1.default.join(getDefaultDatabaseDir(), 'nni.sqlite');
     try {
         fs_1.default.unlinkSync(sqliteFile);
@@ -171,7 +144,6 @@ function cleanupUnitTest() {
     typescript_ioc_1.Container.restore(trainingService_1.TrainingService);
     typescript_ioc_1.Container.restore(datastore_1.DataStore);
     typescript_ioc_1.Container.restore(datastore_1.Database);
-    typescript_ioc_1.Container.restore(experimentManager_1.ExperimentManager);
 }
 exports.cleanupUnitTest = cleanupUnitTest;
 let cachedIpv4Address = null;
@@ -241,15 +213,11 @@ async function getVersion() {
 }
 exports.getVersion = getVersion;
 function getTunerProc(command, stdio, newCwd, newEnv, newShell = true, isDetached = false) {
-    let cmd = command;
-    let arg = [];
     if (process.platform === "win32") {
-        cmd = command.split(" ", 1)[0];
-        arg = command.substr(cmd.length + 1).split(" ");
         newShell = false;
         isDetached = true;
     }
-    const tunerProc = child_process_2.spawn(cmd, arg, {
+    const tunerProc = child_process_2.spawn(command[0], command.slice(1), {
         stdio,
         cwd: newCwd,
         env: newEnv,
@@ -316,24 +284,6 @@ function unixPathJoin(...paths) {
     return dir;
 }
 exports.unixPathJoin = unixPathJoin;
-function withLockSync(func, filePath, lockOpts, ...args) {
-    const lockName = path_1.default.join(path_1.default.dirname(filePath), path_1.default.basename(filePath) + `.lock.${process.pid}`);
-    if (typeof lockOpts['stale'] === 'number') {
-        const lockPath = path_1.default.join(path_1.default.dirname(filePath), path_1.default.basename(filePath) + '.lock.*');
-        const lockFileNames = glob_1.default.sync(lockPath);
-        const canLock = lockFileNames.map((fileName) => {
-            return fs_1.default.existsSync(fileName) && Date.now() - fs_1.default.statSync(fileName).mtimeMs < lockOpts['stale'];
-        }).filter(unexpired => unexpired === true).length === 0;
-        if (!canLock) {
-            throw new Error('File has been locked.');
-        }
-    }
-    lockfile_1.default.lockSync(lockName, lockOpts);
-    const result = func(...args);
-    lockfile_1.default.unlockSync(lockName);
-    return result;
-}
-exports.withLockSync = withLockSync;
 async function isPortOpen(host, port) {
     return new Promise((resolve, reject) => {
         try {

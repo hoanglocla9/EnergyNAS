@@ -11,21 +11,12 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
-    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
-    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
-    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
-    return c > 3 && r && Object.defineProperty(target, key, r), r;
-};
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
     if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
     __setModuleDefault(result, mod);
     return result;
-};
-var __metadata = (this && this.__metadata) || function (k, v) {
-    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -35,26 +26,29 @@ exports.UnitTestHelpers = exports.RestServer = void 0;
 const strict_1 = __importDefault(require("assert/strict"));
 const path_1 = __importDefault(require("path"));
 const express_1 = __importStar(require("express"));
+const express_ws_1 = __importDefault(require("express-ws"));
 const http_proxy_1 = __importDefault(require("http-proxy"));
 const ts_deferred_1 = require("ts-deferred");
-const component_1 = require("common/component");
+const globals_1 = __importDefault(require("common/globals"));
 const log_1 = require("common/log");
-const utils_1 = require("common/utils");
+const tunerCommandChannel = __importStar(require("core/tuner_command_channel"));
 const restHandler_1 = require("./restHandler");
-let RestServer = class RestServer {
+const logger = log_1.getLogger('RestServer');
+class RestServer {
     port;
     urlPrefix;
     server = null;
-    logger = log_1.getLogger('RestServer');
     constructor(port, urlPrefix) {
         strict_1.default(!urlPrefix.startsWith('/') && !urlPrefix.endsWith('/'));
         this.port = port;
         this.urlPrefix = urlPrefix;
+        globals_1.default.shutdown.register('RestServer', this.shutdown.bind(this));
     }
     start() {
-        this.logger.info(`Starting REST server at port ${this.port}, URL prefix: "/${this.urlPrefix}"`);
+        logger.info(`Starting REST server at port ${this.port}, URL prefix: "/${this.urlPrefix}"`);
         const app = express_1.default();
-        app.use('/' + this.urlPrefix, rootRouter(this.shutdown.bind(this)));
+        express_ws_1.default(app, undefined, { wsOptions: { maxPayload: 4 * 1024 * 1024 * 1024 } });
+        app.use('/' + this.urlPrefix, rootRouter());
         app.all('*', (_req, res) => { res.status(404).send(`Outside prefix "/${this.urlPrefix}"`); });
         this.server = app.listen(this.port);
         const deferred = new ts_deferred_1.Deferred();
@@ -62,44 +56,34 @@ let RestServer = class RestServer {
             if (this.port === 0) {
                 this.port = this.server.address().port;
             }
-            this.logger.info('REST server started.');
+            logger.info('REST server started.');
             deferred.resolve();
         });
-        this.server.on('error', (error) => {
-            this.logger.error('REST server error:', error);
-            deferred.reject(error);
-        });
+        this.server.on('error', (error) => { globals_1.default.shutdown.criticalError('RestServer', error); });
         return deferred.promise;
     }
     shutdown() {
-        this.logger.info('Stopping REST server.');
+        logger.info('Stopping REST server.');
         if (this.server === null) {
-            this.logger.warning('REST server is not running.');
+            logger.warning('REST server is not running.');
             return Promise.resolve();
         }
         const deferred = new ts_deferred_1.Deferred();
         this.server.close(() => {
-            this.logger.info('REST server stopped.');
-            deferred.resolve();
-        });
-        this.server.on('error', (error) => {
-            this.logger.error('REST server error:', error);
+            logger.info('REST server stopped.');
             deferred.resolve();
         });
         return deferred.promise;
     }
-};
-RestServer = __decorate([
-    component_1.Singleton,
-    __metadata("design:paramtypes", [Number, String])
-], RestServer);
+}
 exports.RestServer = RestServer;
-function rootRouter(stopCallback) {
+function rootRouter() {
     const router = express_1.Router();
     router.use(express_1.default.json({ limit: '50mb' }));
-    router.use('/api/v1/nni', restHandler_1.createRestHandler(stopCallback));
+    router.use('/api/v1/nni', restHandlerFactory());
+    router.ws('/tuner', (ws, _req, _next) => { tunerCommandChannel.serveWebSocket(ws); });
     const logRouter = express_1.Router();
-    logRouter.get('*', express_1.default.static(logDirectory ?? utils_1.getLogDir()));
+    logRouter.get('*', express_1.default.static(globals_1.default.paths.logDirectory));
     router.use('/logs', logRouter);
     router.use('/netron', netronProxy());
     router.get('*', express_1.default.static(webuiPath));
@@ -118,7 +102,7 @@ function netronProxy() {
 }
 let webuiPath = path_1.default.resolve('static');
 let netronUrl = 'https://netron.app';
-let logDirectory = undefined;
+let restHandlerFactory = restHandler_1.createRestHandler;
 var UnitTestHelpers;
 (function (UnitTestHelpers) {
     function getPort(server) {
@@ -133,8 +117,14 @@ var UnitTestHelpers;
         netronUrl = mockUrl;
     }
     UnitTestHelpers.setNetronUrl = setNetronUrl;
-    function setLogDirectory(path) {
-        logDirectory = path;
+    function disableNniManager() {
+        restHandlerFactory = () => express_1.Router();
     }
-    UnitTestHelpers.setLogDirectory = setLogDirectory;
+    UnitTestHelpers.disableNniManager = disableNniManager;
+    function reset() {
+        webuiPath = path_1.default.resolve('static');
+        netronUrl = 'https://netron.app';
+        restHandlerFactory = restHandler_1.createRestHandler;
+    }
+    UnitTestHelpers.reset = reset;
 })(UnitTestHelpers = exports.UnitTestHelpers || (exports.UnitTestHelpers = {}));

@@ -334,14 +334,15 @@ class LocalTrainingService {
     }
     getScript(workingDirectory) {
         const script = [];
+        const escapedCommand = shellUtils_1.shellString(this.config.trialCommand);
         if (process.platform === 'win32') {
             script.push(`$PSDefaultParameterValues = @{'Out-File:Encoding' = 'utf8'}`);
             script.push(`cd $env:NNI_CODE_DIR`);
-            script.push(`cmd.exe /c ${this.config.trialCommand} 1>${path_1.default.join(workingDirectory, 'stdout')} 2>${path_1.default.join(workingDirectory, 'stderr')}`, `$NOW_DATE = [int64](([datetime]::UtcNow)-(get-date "1/1/1970")).TotalSeconds`, `$NOW_DATE = "$NOW_DATE" + (Get-Date -Format fff).ToString()`, `Write $LASTEXITCODE " " $NOW_DATE  | Out-File "${path_1.default.join(workingDirectory, '.nni', 'state')}" -NoNewline -encoding utf8`);
+            script.push(`cmd.exe /c ${escapedCommand} 1>${path_1.default.join(workingDirectory, 'stdout')} 2>${path_1.default.join(workingDirectory, 'stderr')}`, `$NOW_DATE = [int64](([datetime]::UtcNow)-(get-date "1/1/1970")).TotalSeconds`, `$NOW_DATE = "$NOW_DATE" + (Get-Date -Format fff).ToString()`, `Write $LASTEXITCODE " " $NOW_DATE  | Out-File "${path_1.default.join(workingDirectory, '.nni', 'state')}" -NoNewline -encoding utf8`);
         }
         else {
             script.push(`cd $NNI_CODE_DIR`);
-            script.push(`eval ${this.config.trialCommand} 1>${path_1.default.join(workingDirectory, 'stdout')} 2>${path_1.default.join(workingDirectory, 'stderr')}`);
+            script.push(`eval ${escapedCommand} 1>${path_1.default.join(workingDirectory, 'stdout')} 2>${path_1.default.join(workingDirectory, 'stderr')}`);
             if (process.platform === 'darwin') {
                 script.push(`echo $? \`date +%s999\` >'${path_1.default.join(workingDirectory, '.nni', 'state')}'`);
             }

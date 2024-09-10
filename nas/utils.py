@@ -1,11 +1,12 @@
-
+import nni
+@nni.trace
 def my_import(name):
     components = name.split('.')
     mod = __import__(components[0])
     for comp in components[1:]:
         mod = getattr(mod, comp)
     return mod
-
+@nni.trace
 def adjust_model_code(model):
     import inspect, re
     path = inspect.getfile(model.__class__)

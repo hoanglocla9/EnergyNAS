@@ -27,8 +27,12 @@ var __importStar = (this && this.__importStar) || function (mod) {
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.FrameworkControllerEnvironmentService = void 0;
+const child_process_promise_1 = __importDefault(require("child-process-promise"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const component = __importStar(require("../../../../common/component"));
@@ -90,7 +94,7 @@ let FrameworkControllerEnvironmentService = class FrameworkControllerEnvironment
         environment.maxTrialNumberPerGpu = this.config.maxTrialNumberPerGpu;
         const frameworkcontrollerJobName = `nniexp${this.experimentId}env${environment.id}`.toLowerCase();
         const command = this.generateCommandScript(this.config.taskRoles, environment.command);
-        await fs.promises.writeFile(path.join(this.environmentLocalTempFolder, "run.sh"), command, { encoding: 'utf8' });
+        await fs.promises.writeFile(path.join(this.environmentLocalTempFolder, `${environment.id}_run.sh`), command, { encoding: 'utf8' });
         const trialJobOutputUrl = await this.uploadFolder(this.environmentLocalTempFolder, `nni/${this.experimentId}`);
         environment.trackingUrl = trialJobOutputUrl;
         const frameworkcontrollerJobConfig = await this.prepareFrameworkControllerConfig(environment.id, this.environmentWorkingFolder, frameworkcontrollerJobName);
@@ -104,6 +108,13 @@ let FrameworkControllerEnvironmentService = class FrameworkControllerEnvironment
             return await this.uploadFolderToAzureStorage(srcDirectory, destDirectory, 2);
         }
         else {
+            try {
+                await child_process_promise_1.default.exec(`mkdir -p ${this.nfsRootDir}/${destDirectory}`);
+                await child_process_promise_1.default.exec(`cp -r ${srcDirectory}/* ${this.nfsRootDir}/${destDirectory}`);
+            }
+            catch (uploadError) {
+                return Promise.reject(uploadError);
+            }
             return `nfs://${this.config.storage.server}:${destDirectory}`;
         }
     }
@@ -142,7 +153,7 @@ let FrameworkControllerEnvironmentService = class FrameworkControllerEnvironment
             if (containerPort === undefined) {
                 throw new Error('Container port is not initialized');
             }
-            const taskRole = this.generateTaskRoleConfig(trialWorkingFolder, this.config.taskRoles[index].dockerImage, `run.sh`, podResources[index], containerPort, await this.createRegistrySecret(this.config.taskRoles[index].privateRegistryAuthPath));
+            const taskRole = this.generateTaskRoleConfig(trialWorkingFolder, this.config.taskRoles[index].dockerImage, `${envId}_run.sh`, podResources[index], containerPort, await this.createRegistrySecret(this.config.taskRoles[index].privateRegistryAuthPath));
             taskRoles.push({
                 name: this.config.taskRoles[index].name,
                 taskNumber: this.config.taskRoles[index].taskNumber,

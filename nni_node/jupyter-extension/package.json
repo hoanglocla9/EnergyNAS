@@ -32,7 +32,7 @@
     "extension": true,
     "outputDir": "dist",
     "_build": {
-      "load": "static/remoteEntry.108703baa30f843a207d.js",
+      "load": "static/remoteEntry.34a97dceb5d8fb77e23c.js",
       "extension": "./extension"
     }
   },

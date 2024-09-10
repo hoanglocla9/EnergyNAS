@@ -35,6 +35,7 @@ exports.DlcEnvironmentService = void 0;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const component = __importStar(require("common/component"));
+const ts_deferred_1 = require("ts-deferred");
 const log_1 = require("common/log");
 const experimentStartupInfo_1 = require("common/experimentStartupInfo");
 const dlcClient_1 = require("../dlc/dlcClient");
@@ -44,6 +45,8 @@ const fileCommandChannel_1 = require("../channels/fileCommandChannel");
 const mountedStorageService_1 = require("../storages/mountedStorageService");
 const typescript_ioc_1 = require("typescript-ioc");
 const storageService_1 = require("../storageService");
+const utils_1 = require("common/utils");
+const promises_1 = require("timers/promises");
 let DlcEnvironmentService = class DlcEnvironmentService extends environment_1.EnvironmentService {
     log = log_1.getLogger('dlcEnvironmentService');
     experimentId;
@@ -71,6 +74,7 @@ let DlcEnvironmentService = class DlcEnvironmentService extends environment_1.En
         return 'dlc';
     }
     async refreshEnvironmentsStatus(environments) {
+        const deferred = new ts_deferred_1.Deferred();
         environments.forEach(async (environment) => {
             const dlcClient = environment.dlcClient;
             if (!dlcClient) {
@@ -92,8 +96,10 @@ let DlcEnvironmentService = class DlcEnvironmentService extends environment_1.En
                     environment.setStatus('SUCCEEDED');
                     break;
                 case 'FAILED':
+                    await promises_1.setTimeout(60000);
+                    this.log.debug(`await 60s to create new job,DLC: job ${environment.id} is failed!`);
                     environment.setStatus('FAILED');
-                    return Promise.reject(`DLC: job ${environment.envId} is failed!`);
+                    break;
                 case 'STOPPED':
                 case 'STOPPING':
                     environment.setStatus('USER_CANCELED');
@@ -102,6 +108,8 @@ let DlcEnvironmentService = class DlcEnvironmentService extends environment_1.En
                     environment.setStatus('UNKNOWN');
             }
         });
+        deferred.resolve();
+        return deferred.promise;
     }
     async startEnvironment(environment) {
         const dlcEnvironment = environment;
@@ -113,7 +121,7 @@ let DlcEnvironmentService = class DlcEnvironmentService extends environment_1.En
             await fs_1.default.promises.mkdir(`${dlcEnvironment.workingFolder}/commands`, { recursive: true });
         }
         environment.command = `cd ${environmentRoot} && ${environment.command} 1>${environment.runnerWorkingFolder}/trialrunner_stdout 2>${environment.runnerWorkingFolder}/trialrunner_stderr`;
-        const dlcClient = new dlcClient_1.DlcClient(this.config.type, this.config.image, this.config.jobType, this.config.podCount, this.experimentId, environment.id, this.config.ecsSpec, this.config.region, this.config.nasDataSourceId, this.config.accessKeyId, this.config.accessKeySecret, environment.command, dlcEnvironment.workingFolder, this.config.ossDataSourceId);
+        const dlcClient = new dlcClient_1.DlcClient(this.config.type, this.config.image, this.config.jobType, this.config.podCount, this.experimentId, environment.id, this.config.ecsSpec, this.config.region, this.config.workspaceId, this.config.nasDataSourceId, this.config.accessKeyId, this.config.accessKeySecret, environment.command, path_1.default.join(utils_1.getLogDir(), `envs/${environment.id}`), this.config.ossDataSourceId);
         dlcEnvironment.id = await dlcClient.submit();
         this.log.debug('dlc: before getTrackingUrl');
         dlcEnvironment.trackingUrl = await dlcClient.getTrackingUrl();

@@ -13,7 +13,7 @@ import sys
 import types
 import warnings
 from io import IOBase
-from typing import Any, Dict, List, Optional, TypeVar, Union
+from typing import Any, Dict, List, Optional, Type, TypeVar, Tuple, Union, cast
 
 import cloudpickle  # use cloudpickle as backend for unserializable types and instances
 import json_tricks  # use json_tricks as serializer backend
@@ -115,13 +115,13 @@ def is_wrapped_with_trace(cls_or_func: Any) -> bool:
     )
 
 
-class SerializableObject(Traceable):
+class SerializableObject(Traceable):  # should be (Generic[T], Traceable), but cloudpickle is unhappy with Generic.
     """
     Serializable object is a wrapper of existing python objects, that supports dump and load easily.
     Stores a symbol ``s`` and a dict of arguments ``args``, and the object can be restored with ``s(**args)``.
     """
 
-    def __init__(self, symbol: T, args: List[Any], kwargs: Dict[str, Any], call_super: bool = False):
+    def __init__(self, symbol: Type, args: List[Any], kwargs: Dict[str, Any], call_super: bool = False):
         # use dict to avoid conflicts with user's getattr and setattr
         self.__dict__['_nni_symbol'] = symbol
         self.__dict__['_nni_args'] = args
@@ -135,14 +135,14 @@ class SerializableObject(Traceable):
                 **{kw: _argument_processor(arg) for kw, arg in kwargs.items()}
             )
 
-    def trace_copy(self) -> Union[T, 'SerializableObject']:
+    def trace_copy(self) -> 'SerializableObject':
         return SerializableObject(
             self.trace_symbol,
             [copy.copy(arg) for arg in self.trace_args],
             {k: copy.copy(v) for k, v in self.trace_kwargs.items()},
         )
 
-    def get(self) -> T:
+    def get(self) -> Any:
         if not self._get_nni_attr('call_super'):
             # Reinitialize
             return trace(self.trace_symbol)(*self.trace_args, **self.trace_kwargs)
@@ -187,7 +187,7 @@ class SerializableObject(Traceable):
             ')'
 
 
-def inject_trace_info(obj: Any, symbol: T, args: List[Any], kwargs: Dict[str, Any]) -> Any:
+def inject_trace_info(obj: Any, symbol: T, args: List[Any], kwargs: Dict[str, Any]) -> T:
     # If an object is already created, this can be a fix so that the necessary info are re-injected into the object.
     # Make obj complying with the interface of traceable, though we cannot change its base class.
     obj.__dict__.update(_nni_symbol=symbol, _nni_args=args, _nni_kwargs=kwargs)
@@ -233,11 +233,11 @@ def _make_class_traceable(cls: T, create_wrapper: bool = False) -> T:
     else:
         # sometimes create_wrapper is mandatory, e.g., for built-in types like list/int.
         # but I don't want to check here because it's unreliable.
-        wrapper = type('wrapper', (Traceable, cls), attributes)
-        return wrapper
+        wrapper = type('wrapper', (Traceable, cast(Type, cls)), attributes)
+        return cast(T, wrapper)
 
 
-def trace(cls_or_func: T = None, *, kw_only: bool = True, inheritable: bool = False) -> Union[T, Traceable]:
+def trace(cls_or_func: T = cast(T, None), *, kw_only: bool = True, inheritable: bool = False) -> T:
     """
     Annotate a function or a class if you want to preserve where it comes from.
     This is usually used in the following scenarios:
@@ -283,7 +283,7 @@ def trace(cls_or_func: T = None, *, kw_only: bool = True, inheritable: bool = Fa
     # Might be changed in future.
     nni_trace_flag = os.environ.get('NNI_TRACE_FLAG', '')
     if nni_trace_flag.lower() == 'disable':
-        return cls_or_func
+        return cast(T, cls_or_func)
 
     def wrap(cls_or_func):
         # already annotated, do nothing
@@ -301,19 +301,21 @@ def trace(cls_or_func: T = None, *, kw_only: bool = True, inheritable: bool = Fa
 
     # if we're being called as @trace()
     if cls_or_func is None:
-        return wrap
+        return wrap  # type: ignore
 
     # if we are called without parentheses
-    return wrap(cls_or_func)
+    return wrap(cls_or_func)  # type: ignore
 
 
 def dump(obj: Any, fp: Optional[Any] = None, *, use_trace: bool = True, pickle_size_limit: int = 4096,
-         allow_nan: bool = True, **json_tricks_kwargs) -> Union[str, bytes]:
+         allow_nan: bool = True, **json_tricks_kwargs) -> str:
     """
     Convert a nested data structure to a json string. Save to file if fp is specified.
     Use json-tricks as main backend. For unhandled cases in json-tricks, use cloudpickle.
     The serializer is not designed for long-term storage use, but rather to copy data between processes.
     The format is also subject to change between NNI releases.
+
+    To compress the payload, please use :func:`dump_bytes`.
 
     Parameters
     ----------
@@ -334,6 +336,40 @@ def dump(obj: Any, fp: Optional[Any] = None, *, use_trace: bool = True, pickle_s
         Normally str. Sometimes bytes (if compressed).
     """
 
+    if json_tricks_kwargs.get('compression') is not None:
+        raise ValueError('If you meant to compress the dumped payload, please use `dump_bytes`.')
+    result = _dump(
+        obj=obj,
+        fp=fp,
+        use_trace=use_trace,
+        pickle_size_limit=pickle_size_limit,
+        allow_nan=allow_nan,
+        **json_tricks_kwargs)
+    return cast(str, result)
+
+
+def dump_bytes(obj: Any, fp: Optional[Any] = None, *, compression: int = cast(int, None),
+               use_trace: bool = True, pickle_size_limit: int = 4096,
+               allow_nan: bool = True, **json_tricks_kwargs) -> bytes:
+    """
+    Same as :func:`dump`, but to comporess payload, with `compression <https://json-tricks.readthedocs.io/en/stable/#dump>`__.
+    """
+    if compression is None:
+        raise ValueError('compression must be set.')
+    result = _dump(
+        obj=obj,
+        fp=fp,
+        compression=compression,
+        use_trace=use_trace,
+        pickle_size_limit=pickle_size_limit,
+        allow_nan=allow_nan,
+        **json_tricks_kwargs)
+    return cast(bytes, result)
+
+
+def _dump(*, obj: Any, fp: Optional[Any], use_trace: bool, pickle_size_limit: int,
+          allow_nan: bool, **json_tricks_kwargs) -> Union[str, bytes]:
+    
     encoders = [
         # we don't need to check for dependency as many of those have already been required by NNI
         json_tricks.pathlib_encode,         # pathlib is a required dependency for NNI
@@ -352,12 +388,14 @@ def dump(obj: Any, fp: Optional[Any] = None, *, use_trace: bool = True, pickle_s
     json_tricks_kwargs['allow_nan'] = allow_nan
 
     if fp is not None:
+        print(obj)
         return json_tricks.dump(obj, fp, obj_encoders=encoders, **json_tricks_kwargs)
     else:
         return json_tricks.dumps(obj, obj_encoders=encoders, **json_tricks_kwargs)
 
 
-def load(string: Optional[str] = None, *, fp: Optional[Any] = None, ignore_comments: bool = True, **json_tricks_kwargs) -> Any:
+def load(string: Optional[str] = None, *, fp: Optional[Any] = None,
+         preserve_order: bool = False, ignore_comments: bool = True, **json_tricks_kwargs) -> Any:
     """
     Load the string or from file, and convert it to a complex data structure.
     At least one of string or fp has to be not none.
@@ -368,6 +406,10 @@ def load(string: Optional[str] = None, *, fp: Optional[Any] = None, ignore_comme
         JSON string to parse. Can be set to none if fp is used.
     fp : str
         File path to load JSON from. Can be set to none if string is used.
+    preserve_order : bool
+        `json_tricks parameter <https://json-tricks.readthedocs.io/en/latest/#order>`_
+        to use ``OrderedDict`` instead of ``dict``.
+        The order is in fact always preserved even when this is False.
     ignore_comments : bool
         Remove comments (starting with ``#`` or ``//``). Default is true.
 
@@ -392,6 +434,8 @@ def load(string: Optional[str] = None, *, fp: Optional[Any] = None, ignore_comme
         _json_tricks_any_object_decode
     ]
 
+    # there was an issue that the user code does not accept ordered dict, and 3.7+ dict has guaranteed order
+    json_tricks_kwargs['preserve_order'] = preserve_order
     # to bypass a deprecation warning in json-tricks
     json_tricks_kwargs['ignore_comments'] = ignore_comments
 
@@ -456,13 +500,23 @@ def _trace_cls(base, kw_only, call_super=True, inheritable=False):
             raise TypeError(f"{base} has a superclass already decorated with trace, and it's using a customized metaclass {type(base)}. "
                             "Please either use the default metaclass, or remove trace from the super-class.")
 
-    class wrapper(SerializableObject, base, metaclass=metaclass):
+    class wrapper(SerializableObject, base, metaclass=metaclass):  # type: ignore
         def __init__(self, *args, **kwargs):
             # store a copy of initial parameters
             args, kwargs = _formulate_arguments(base.__init__, args, kwargs, kw_only, is_class_init=True)
 
-            # calling serializable object init to initialize the full object
-            super().__init__(symbol=base, args=args, kwargs=kwargs, call_super=call_super)
+            try:
+                # calling serializable object init to initialize the full object
+                super().__init__(symbol=base, args=args, kwargs=kwargs, call_super=call_super)
+            except RecursionError as e:
+                warnings.warn(
+                    'Recursion error detected in initialization of wrapped object. '
+                    'Did you use `super(MyClass, self).__init__()` rather than `super().__init__()`? '
+                    'Please use `super().__init__()` and try again. '
+                    f'Original error: {e}',
+                    RuntimeWarning
+                )
+                raise
 
         def __reduce__(self):
             # The issue that decorator and pickler doesn't play well together is well known.
@@ -486,6 +540,7 @@ def _trace_cls(base, kw_only, call_super=True, inheritable=False):
 
             # Pickle can't handle type objects.
             if '_nni_symbol' in obj_:
+                obj_ = dict(obj_)  # copy the object to keep the original symbol unchanged
                 obj_['_nni_symbol'] = cloudpickle.dumps(obj_['_nni_symbol'])
 
             return _pickling_object, (type_, kw_only, obj_)
@@ -528,7 +583,8 @@ def _trace_func(func, kw_only):
             # and thus not possible to restore the trace parameters after dump and reload.
             # this is a known limitation.
             new_type = _make_class_traceable(type(res), True)
-            res = new_type(res)  # re-creating the object
+            # re-creating the object
+            res = new_type(res)  # type: ignore
             res = inject_trace_info(res, func, args, kwargs)
         else:
             raise TypeError(f'Try to add trace info to {res}, but the type "{type(res)}" is unknown. '
@@ -561,7 +617,7 @@ class _unwrap_metaclass(type):
 
     def __new__(cls, name, bases, dct):
         bases = tuple([getattr(base, '__wrapped__', base) for base in bases])
-        return super().__new__(cls, name, bases, dct)
+        return super().__new__(cls, name, cast(Tuple[type, ...], bases), dct)
 
     # Using a customized "bases" breaks default isinstance and issubclass.
     # We recover this by overriding the subclass and isinstance behavior, which conerns wrapped class only.
@@ -728,6 +784,11 @@ def _get_cls_or_func_name(cls_or_func: Any) -> str:
 
 
 def get_hybrid_cls_or_func_name(cls_or_func: Any, pickle_size_limit: int = 4096) -> str:
+    """Pickle a class or function object to a string.
+
+    It will first try to picklize the object with an importable path.
+    If that doesn't work out, it fallbacks to cloudpickle.
+    """
     try:
         name = _get_cls_or_func_name(cls_or_func)
         # import success, use a path format
@@ -750,7 +811,7 @@ def import_cls_or_func_from_hybrid_name(s: str) -> Any:
     return _import_cls_or_func_from_name(s)
 
 
-def _json_tricks_func_or_cls_encode(cls_or_func: Any, primitives: bool = False, pickle_size_limit: int = 4096) -> str:
+def _json_tricks_func_or_cls_encode(cls_or_func: Any, primitives: bool = False, pickle_size_limit: int = 4096) -> Dict[str, str]:
     if not isinstance(cls_or_func, type) and not _is_function(cls_or_func):
         # not a function or class, continue
         return cls_or_func
@@ -762,8 +823,7 @@ def _json_tricks_func_or_cls_encode(cls_or_func: Any, primitives: bool = False, 
 
 def _json_tricks_func_or_cls_decode(s: Dict[str, Any]) -> Any:
     if isinstance(s, dict) and '__nni_type__' in s:
-        s = s['__nni_type__']
-        return import_cls_or_func_from_hybrid_name(s)
+        return import_cls_or_func_from_hybrid_name(s['__nni_type__'])
     return s
 
 
@@ -815,8 +875,7 @@ def _json_tricks_any_object_encode(obj: Any, primitives: bool = False, pickle_si
 
 def _json_tricks_any_object_decode(obj: Dict[str, Any]) -> Any:
     if isinstance(obj, dict) and '__nni_obj__' in obj:
-        obj = obj['__nni_obj__']
-        b = base64.b64decode(obj)
+        b = base64.b64decode(obj['__nni_obj__'])
         return _wrapped_cloudpickle_loads(b)
     return obj
 

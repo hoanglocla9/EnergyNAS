@@ -29,12 +29,14 @@ class KubernetesEnvironmentService extends environment_1.EnvironmentService {
     CONTAINER_MOUNT_PATH;
     log = log_1.getLogger('KubernetesEnvironmentService');
     environmentWorkingFolder;
+    nfsRootDir;
     constructor(_config, info) {
         super();
         this.CONTAINER_MOUNT_PATH = '/tmp/mount';
         this.genericK8sClient = new kubernetesApiClient_1.GeneralK8sClient();
         this.experimentRootDir = info.logDir;
         this.environmentLocalTempFolder = path_1.default.join(this.experimentRootDir, "environment-temp");
+        this.nfsRootDir = path_1.default.join(this.experimentRootDir, "nfs-root");
         this.experimentId = info.experimentId;
         this.environmentWorkingFolder = path_1.default.join(this.CONTAINER_MOUNT_PATH, 'nni', this.experimentId);
     }
@@ -121,12 +123,12 @@ class KubernetesEnvironmentService extends environment_1.EnvironmentService {
         return Promise.resolve(folderUriInAzure);
     }
     async createNFSStorage(nfsServer, nfsPath) {
-        await child_process_promise_1.default.exec(`mkdir -p ${this.environmentLocalTempFolder}`);
+        await child_process_promise_1.default.exec(`mkdir -p ${this.nfsRootDir}`);
         try {
-            await child_process_promise_1.default.exec(`sudo mount ${nfsServer}:${nfsPath} ${this.environmentLocalTempFolder}`);
+            await child_process_promise_1.default.exec(`sudo mount ${nfsServer}:${nfsPath} ${this.nfsRootDir}`);
         }
         catch (error) {
-            const mountError = `Mount NFS ${nfsServer}:${nfsPath} to ${this.environmentLocalTempFolder} failed, error is ${error}`;
+            const mountError = `Mount NFS ${nfsServer}:${nfsPath} to ${this.nfsRootDir} failed, error is ${error}`;
             this.log.error(mountError);
             return Promise.reject(mountError);
         }

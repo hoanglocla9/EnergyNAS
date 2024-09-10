@@ -3,114 +3,93 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.stopLogging = exports.startLogging = exports.setLogLevel = exports.getLogger = exports.Logger = exports.FATAL = exports.TRACE = exports.CRITICAL = exports.ERROR = exports.WARNING = exports.INFO = exports.DEBUG = void 0;
-const fs_1 = __importDefault(require("fs"));
+exports.Logger = exports.getRobustLogger = exports.getLogger = void 0;
 const util_1 = __importDefault(require("util"));
-exports.DEBUG = 10;
-exports.INFO = 20;
-exports.WARNING = 30;
-exports.ERROR = 40;
-exports.CRITICAL = 50;
-exports.TRACE = 1;
-exports.FATAL = 50;
-const levelNames = new Map([
-    [exports.CRITICAL, 'CRITICAL'],
-    [exports.ERROR, 'ERROR'],
-    [exports.WARNING, 'WARNING'],
-    [exports.INFO, 'INFO'],
-    [exports.DEBUG, 'DEBUG'],
-    [exports.TRACE, 'TRACE'],
-]);
-let logLevel = 0;
-const loggers = new Map();
+const globals_1 = __importDefault(require("common/globals"));
+const levelNameToValue = { trace: 0, debug: 10, info: 20, warning: 30, error: 40, critical: 50 };
+const loggers = {};
+function getLogger(name) {
+    if (loggers[name] === undefined) {
+        loggers[name] = new Logger(name);
+    }
+    return loggers[name];
+}
+exports.getLogger = getLogger;
+function getRobustLogger(name) {
+    if (loggers[name] === undefined || !loggers[name].robust) {
+        loggers[name] = new RobustLogger(name);
+    }
+    return loggers[name];
+}
+exports.getRobustLogger = getRobustLogger;
 class Logger {
     name;
-    constructor(name = 'root') {
+    constructor(name) {
         this.name = name;
     }
     trace(...args) {
-        this.log(exports.TRACE, args);
+        this.log(levelNameToValue.trace, 'TRACE', args);
     }
     debug(...args) {
-        this.log(exports.DEBUG, args);
+        this.log(levelNameToValue.debug, 'DEBUG', args);
     }
     info(...args) {
-        this.log(exports.INFO, args);
+        this.log(levelNameToValue.info, 'INFO', args);
     }
     warning(...args) {
-        this.log(exports.WARNING, args);
+        this.log(levelNameToValue.warning, 'WARNING', args);
     }
     error(...args) {
-        this.log(exports.ERROR, args);
+        this.log(levelNameToValue.error, 'ERROR', args);
     }
     critical(...args) {
-        this.log(exports.CRITICAL, args);
+        this.log(levelNameToValue.critical, 'CRITICAL', args);
     }
-    fatal(...args) {
-        this.log(exports.FATAL, args);
-    }
-    log(level, args) {
-        const logFile = global.logFile;
-        if (level < logLevel) {
-            return;
-        }
-        const zeroPad = (num) => num.toString().padStart(2, '0');
-        const now = new Date();
-        const date = now.getFullYear() + '-' + zeroPad(now.getMonth() + 1) + '-' + zeroPad(now.getDate());
-        const time = zeroPad(now.getHours()) + ':' + zeroPad(now.getMinutes()) + ':' + zeroPad(now.getSeconds());
-        const datetime = date + ' ' + time;
-        const levelName = levelNames.has(level) ? levelNames.get(level) : level.toString();
-        const message = args.map(arg => (typeof arg === 'string' ? arg : util_1.default.inspect(arg))).join(' ');
-        const record = `[${datetime}] ${levelName} (${this.name}) ${message}`;
-        if (logFile === undefined) {
-            if (!isUnitTest()) {
-                console.log(record);
-            }
-        }
-        else {
-            logFile.write(record + '\n');
+    log(levelValue, levelName, args) {
+        if (levelValue >= levelNameToValue[globals_1.default.args.logLevel]) {
+            const msg = `[${timestamp()}] ${levelName} (${this.name}) ${formatArgs(args)}`;
+            globals_1.default.logStream.writeLine(msg);
         }
     }
 }
 exports.Logger = Logger;
-function getLogger(name = 'root') {
-    let logger = loggers.get(name);
-    if (logger === undefined) {
-        logger = new Logger(name);
-        loggers.set(name, logger);
-    }
-    return logger;
-}
-exports.getLogger = getLogger;
-function setLogLevel(levelName) {
-    if (levelName) {
-        const level = module.exports[levelName.toUpperCase()];
-        if (typeof level === 'number') {
-            logLevel = level;
+class RobustLogger extends Logger {
+    robust = true;
+    errorOccurred = false;
+    log(levelValue, levelName, args) {
+        if (this.errorOccurred) {
+            this.logAfterError(levelName, args);
+            return;
         }
-        else {
-            console.log('[ERROR] Bad log level:', levelName);
-            getLogger('logging').error('Bad log level:', levelName);
+        try {
+            if (levelValue >= levelNameToValue[globals_1.default.args.logLevel]) {
+                const msg = `[${timestamp()}] ${levelName} (${this.name}) ${formatArgs(args)}`;
+                globals_1.default.logStream.writeLineSync(msg);
+            }
+        }
+        catch (error) {
+            this.errorOccurred = true;
+            console.error('[ERROR] Logger has stopped working:', error);
+            this.logAfterError(levelName, args);
         }
     }
-}
-exports.setLogLevel = setLogLevel;
-function startLogging(logPath) {
-    global.logFile = fs_1.default.createWriteStream(logPath, {
-        flags: 'a+',
-        encoding: 'utf8',
-        autoClose: true
-    });
-}
-exports.startLogging = startLogging;
-function stopLogging() {
-    if (global.logFile !== undefined) {
-        global.logFile.end();
-        global.logFile = undefined;
+    logAfterError(levelName, args) {
+        try {
+            args = args.map(arg => util_1.default.inspect(arg));
+        }
+        catch { }
+        console.error(`[${levelName}] (${this.name})`, ...args);
     }
 }
-exports.stopLogging = stopLogging;
-function isUnitTest() {
-    const event = process.env['npm_lifecycle_event'] ?? '';
-    return event.startsWith('test') || event === 'mocha' || event === 'nyc';
+function timestamp() {
+    const now = new Date();
+    const date = now.getFullYear() + '-' + zeroPad(now.getMonth() + 1) + '-' + zeroPad(now.getDate());
+    const time = zeroPad(now.getHours()) + ':' + zeroPad(now.getMinutes()) + ':' + zeroPad(now.getSeconds());
+    return date + ' ' + time;
+}
+function zeroPad(num) {
+    return num.toString().padStart(2, '0');
+}
+function formatArgs(args) {
+    return args.map(arg => (typeof arg === 'string' ? arg : util_1.default.inspect(arg))).join(' ');
 }

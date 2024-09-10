@@ -11,7 +11,7 @@ import torch, nni, onnx, os
 import inspect, re
 _logger = logging.getLogger(__name__)
 
-
+@nni.trace
 class HardwareMetricEstimator:
     def __init__(self, applied_hardware, hardware_metrics=["latency"]):
         import nn_meter  # pylint: disable=import-error

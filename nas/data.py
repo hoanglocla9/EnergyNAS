@@ -7,7 +7,7 @@ import nni
 import logging
 
 _logger = logging.getLogger(__name__)
-
+@nni.trace
 class StandardScaler:
 
     def __init__(self, mean=None, std=None, epsilon=1e-7):
@@ -66,7 +66,7 @@ class MISO_Data_v1(Dataset):
         return self.x[idx],self.y[idx]
     
 
-
+@nni.trace
 class MISO_Data_v2(Dataset):
     def __init__(self, lag_range, target):
         super().__init__()

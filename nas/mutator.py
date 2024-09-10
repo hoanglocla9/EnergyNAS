@@ -157,7 +157,7 @@ class BlockMutator(Mutator):
             update_node_attribute(node, [[1, in_ch]], [[1, 1]])
 
 
-
+@nni.trace
 class MLPMutator(Mutator):
     def __init__(self, target):
         super(MLPMutator, self).__init__()

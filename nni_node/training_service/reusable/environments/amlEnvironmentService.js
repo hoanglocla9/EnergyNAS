@@ -116,6 +116,7 @@ let AMLEnvironmentService = class AMLEnvironmentService extends environment_1.En
         amlEnvironment.maxTrialNumberPerGpu = this.config.maxTrialNumberPerGpu;
         await fs_1.default.promises.writeFile(path_1.default.join(environmentLocalTempFolder, 'nni_script.py'), amlEnvironment.command, { encoding: 'utf8' });
         const amlClient = new amlClient_1.AMLClient(this.config.subscriptionId, this.config.resourceGroup, this.config.workspaceName, this.experimentId, this.config.computeTarget, this.config.dockerImage, 'nni_script.py', environmentLocalTempFolder);
+        this.log.debug('aml: before amlClient submit');
         amlEnvironment.id = await amlClient.submit();
         this.log.debug('aml: before getTrackingUrl');
         amlEnvironment.trackingUrl = await amlClient.getTrackingUrl();
