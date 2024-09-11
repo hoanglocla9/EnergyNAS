@@ -60,14 +60,8 @@ if __name__ == "__main__":
         else:
             search_strategy = strategy.PolicyBasedRL(max_collect=cfg["trial_number"]//2, trial_per_collect=2)
 
-    if cfg['backbone_model'] == "mlp":
-        applied_mutators = [
-            MLPMutator('mutable_all')
-        ]
-    else:
-        applied_mutators = []
 
-    exp = RetiariiExperiment(model_space, evaluator, applied_mutators, search_strategy)
+    exp = RetiariiExperiment(model_space, evaluator, [], search_strategy)
     exp_config = RetiariiExeConfig('local')
     exp_config.experiment_name = 'mnist_search'
     exp_config.execution_engine = 'base'
