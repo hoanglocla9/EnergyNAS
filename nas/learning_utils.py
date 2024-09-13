@@ -9,6 +9,9 @@ from sklearn.model_selection import KFold
 from .estimator import  HardwareMetricEstimator
 from torchmetrics.regression import MeanAbsolutePercentageError
 
+from nni.nas.evaluator.pytorch import Lightning, Trainer, DataLoader
+from .darts import DartsRegressionModule
+
 @nni.trace
 def latency_reward_component(latency, target_latency):
     alpha, beta = -0.07, -0.07 # as in the paper  https://openaccess.thecvf.com/content_CVPR_2019/papers/Tan_MnasNet_Platform-Aware_Neural_Architecture_Search_for_Mobile_CVPR_2019_paper.pdf
@@ -22,6 +25,37 @@ def reward_function(accuracy, latency, target_latency):
     # normalized_accuracy = (accuracy - 0.35) / ( 8-0.35)
     # accuracy
     return -1.0 * accuracy * latency_component
+
+@nni.trace
+def accuracy_reward_component(accuracy, target_accuracy):
+    alpha, beta =  2, -1# -0.07, -0.07 # as in the paper  https://openaccess.thecvf.com/content_CVPR_2019/papers/Tan_MnasNet_Platform-Aware_Neural_Architecture_Search_for_Mobile_CVPR_2019_paper.pdf
+    if accuracy < target_accuracy:
+        return (accuracy * 1.0 /target_accuracy * 1.0) ** alpha
+    else:
+        return (accuracy * 1.0 /target_accuracy * 1.0) ** beta
+@nni.trace
+def reward_function_v2(accuracy, energy, target_accuracy):
+    accuracy_component = latency_reward_component(accuracy, target_accuracy)
+    # normalized_accuracy = (accuracy - 0.35) / ( 8-0.35)
+    # accuracy
+    return -1.0 * energy * accuracy_component
+
+@nni.trace
+def evaluate_model_darts(lag_range, target, n_gpus=0, max_epochs=50, fast_dev_run=False):
+    dataset = nni.trace(MISO_Data_v1)(lag_range, target)
+    train_set, valid_set = torch.utils.data.random_split(dataset, [0.7, 0.3])
+    search_train_loader, search_valid_loader =  nni.trace(DataLoader)(train_set),  nni.trace(DataLoader)(valid_set)
+
+    evaluator = Lightning(
+        DartsRegressionModule(0.025, 3e-4, 0., max_epochs),
+        Trainer(
+                max_epochs=max_epochs,
+                fast_dev_run=fast_dev_run,
+        ),
+        train_dataloaders=search_train_loader,
+        val_dataloaders=search_valid_loader
+    )
+    return evaluator
 
 @nni.trace
 def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_values, mode="filter", target_device="myriadvpu_openvino2019r2"):
@@ -52,8 +86,8 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
     k_folds = 3
     kfold = nni.trace(KFold)(n_splits=k_folds, shuffle=True)
     dataset = nni.trace(MISO_Data_v1)(lag_range, target)
-    criterion = nni.trace(torch.nn.L1Loss())
-    acc_fn = nni.trace(MeanAbsolutePercentageError())## torch.nn.MSELoss()
+    criterion = torch.nn.L1Loss()
+    acc_fn = MeanAbsolutePercentageError()## torch.nn.MSELoss()
 
     average_loss = 0.0
     average_min = 0.0
@@ -124,9 +158,9 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
             final_metrics["MAE"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
             if mode == "mmo":
                 if "MAE" in optimized_metrics:
-                    final_metrics["default"].append(reward_function(sum(min_loss_list)/len(min_loss_list), hardware_estimated_result['latency'], target_values["latency"]))
+                    final_metrics["default"].append(reward_function_v2(sum(min_loss_list)/len(min_loss_list), hardware_estimated_result['energy'], target_values["accuracy"]))
                 else:
-                    final_metrics["default"].append(reward_function(sum(min_acc_list)/len(min_acc_list), hardware_estimated_result['latency'], target_values["latency"]))
+                    final_metrics["default"].append(reward_function_v2(sum(min_acc_list)/len(min_acc_list), hardware_estimated_result['energy'], target_values["accuracy"]))
             elif mode == "filter":
                 if "MAE" in optimized_metrics:
                     final_metrics["default"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))

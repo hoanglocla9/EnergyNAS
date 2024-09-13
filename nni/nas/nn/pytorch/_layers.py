@@ -4,7 +4,7 @@
 # When pytorch version does not match, it will get automatically updated.
 # pylint: skip-file
 # pyright: reportGeneralTypeIssues=false
-# _torch_version = 2.4.0+cu121
+# _torch_version = 2.0.1+cu117
 # _torch_nn_cache_version = 3
 import typing
 import torch.nn as nn
@@ -29,9 +29,6 @@ Bilinear = typing.cast(typing.Type[nn.Bilinear], basic_unit(nn.Bilinear))
 CELU = typing.cast(typing.Type[nn.CELU], basic_unit(nn.CELU))
 CTCLoss = typing.cast(typing.Type[nn.CTCLoss], basic_unit(nn.CTCLoss))
 ChannelShuffle = typing.cast(typing.Type[nn.ChannelShuffle], basic_unit(nn.ChannelShuffle))
-CircularPad1d = typing.cast(typing.Type[nn.CircularPad1d], basic_unit(nn.CircularPad1d))
-CircularPad2d = typing.cast(typing.Type[nn.CircularPad2d], basic_unit(nn.CircularPad2d))
-CircularPad3d = typing.cast(typing.Type[nn.CircularPad3d], basic_unit(nn.CircularPad3d))
 ConstantPad1d = typing.cast(typing.Type[nn.ConstantPad1d], basic_unit(nn.ConstantPad1d))
 ConstantPad2d = typing.cast(typing.Type[nn.ConstantPad2d], basic_unit(nn.ConstantPad2d))
 ConstantPad3d = typing.cast(typing.Type[nn.ConstantPad3d], basic_unit(nn.ConstantPad3d))
@@ -79,7 +76,6 @@ KLDivLoss = typing.cast(typing.Type[nn.KLDivLoss], basic_unit(nn.KLDivLoss))
 L1Loss = typing.cast(typing.Type[nn.L1Loss], basic_unit(nn.L1Loss))
 LPPool1d = typing.cast(typing.Type[nn.LPPool1d], basic_unit(nn.LPPool1d))
 LPPool2d = typing.cast(typing.Type[nn.LPPool2d], basic_unit(nn.LPPool2d))
-LPPool3d = typing.cast(typing.Type[nn.LPPool3d], basic_unit(nn.LPPool3d))
 LSTM = typing.cast(typing.Type[nn.LSTM], basic_unit(nn.LSTM))
 LSTMCell = typing.cast(typing.Type[nn.LSTMCell], basic_unit(nn.LSTMCell))
 LayerNorm = typing.cast(typing.Type[nn.LayerNorm], basic_unit(nn.LayerNorm))
@@ -127,7 +123,6 @@ ParameterList = nn.ParameterList
 PixelShuffle = typing.cast(typing.Type[nn.PixelShuffle], basic_unit(nn.PixelShuffle))
 PixelUnshuffle = typing.cast(typing.Type[nn.PixelUnshuffle], basic_unit(nn.PixelUnshuffle))
 PoissonNLLLoss = typing.cast(typing.Type[nn.PoissonNLLLoss], basic_unit(nn.PoissonNLLLoss))
-RMSNorm = typing.cast(typing.Type[nn.RMSNorm], basic_unit(nn.RMSNorm))
 RNN = typing.cast(typing.Type[nn.RNN], basic_unit(nn.RNN))
 RNNBase = typing.cast(typing.Type[nn.RNNBase], basic_unit(nn.RNNBase))
 RNNCell = typing.cast(typing.Type[nn.RNNCell], basic_unit(nn.RNNCell))
@@ -171,11 +166,8 @@ UninitializedParameter = nn.UninitializedParameter
 Upsample = typing.cast(typing.Type[nn.Upsample], basic_unit(nn.Upsample))
 UpsamplingBilinear2d = typing.cast(typing.Type[nn.UpsamplingBilinear2d], basic_unit(nn.UpsamplingBilinear2d))
 UpsamplingNearest2d = typing.cast(typing.Type[nn.UpsamplingNearest2d], basic_unit(nn.UpsamplingNearest2d))
-ZeroPad1d = typing.cast(typing.Type[nn.ZeroPad1d], basic_unit(nn.ZeroPad1d))
 ZeroPad2d = typing.cast(typing.Type[nn.ZeroPad2d], basic_unit(nn.ZeroPad2d))
-ZeroPad3d = typing.cast(typing.Type[nn.ZeroPad3d], basic_unit(nn.ZeroPad3d))
 _reduction = nn._reduction
-attention = nn.attention
 common_types = nn.common_types
 factory_kwargs = nn.factory_kwargs
 functional = nn.functional
@@ -189,4 +181,4 @@ qat = nn.qat
 quantizable = nn.quantizable
 quantized = nn.quantized
 utils = nn.utils
-__all__ = ['AdaptiveAvgPool1d', 'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d', 'AdaptiveLogSoftmaxWithLoss', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AlphaDropout', 'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'BCELoss', 'BCEWithLogitsLoss', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'Bilinear', 'CELU', 'CTCLoss', 'ChannelShuffle', 'CircularPad1d', 'CircularPad2d', 'CircularPad3d', 'ConstantPad1d', 'ConstantPad2d', 'ConstantPad3d', 'Container', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d', 'CosineEmbeddingLoss', 'CosineSimilarity', 'CrossEntropyLoss', 'CrossMapLRN2d', 'DataParallel', 'Dropout', 'Dropout1d', 'Dropout2d', 'Dropout3d', 'ELU', 'Embedding', 'EmbeddingBag', 'FeatureAlphaDropout', 'Flatten', 'Fold', 'FractionalMaxPool2d', 'FractionalMaxPool3d', 'GELU', 'GLU', 'GRU', 'GRUCell', 'GaussianNLLLoss', 'GroupNorm', 'Hardshrink', 'Hardsigmoid', 'Hardswish', 'Hardtanh', 'HingeEmbeddingLoss', 'HuberLoss', 'Identity', 'InstanceNorm1d', 'InstanceNorm2d', 'InstanceNorm3d', 'KLDivLoss', 'L1Loss', 'LPPool1d', 'LPPool2d', 'LPPool3d', 'LSTM', 'LSTMCell', 'LayerNorm', 'LazyBatchNorm1d', 'LazyBatchNorm2d', 'LazyBatchNorm3d', 'LazyConv1d', 'LazyConv2d', 'LazyConv3d', 'LazyConvTranspose1d', 'LazyConvTranspose2d', 'LazyConvTranspose3d', 'LazyInstanceNorm1d', 'LazyInstanceNorm2d', 'LazyInstanceNorm3d', 'LazyLinear', 'LeakyReLU', 'Linear', 'LocalResponseNorm', 'LogSigmoid', 'LogSoftmax', 'MSELoss', 'MarginRankingLoss', 'MaxPool1d', 'MaxPool2d', 'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d', 'Mish', 'Module', 'ModuleDict', 'ModuleList', 'MultiLabelMarginLoss', 'MultiLabelSoftMarginLoss', 'MultiMarginLoss', 'MultiheadAttention', 'NLLLoss', 'NLLLoss2d', 'PReLU', 'PairwiseDistance', 'Parameter', 'ParameterDict', 'ParameterList', 'PixelShuffle', 'PixelUnshuffle', 'PoissonNLLLoss', 'RMSNorm', 'RNN', 'RNNBase', 'RNNCell', 'RNNCellBase', 'RReLU', 'ReLU', 'ReLU6', 'ReflectionPad1d', 'ReflectionPad2d', 'ReflectionPad3d', 'ReplicationPad1d', 'ReplicationPad2d', 'ReplicationPad3d', 'SELU', 'Sequential', 'SiLU', 'Sigmoid', 'SmoothL1Loss', 'SoftMarginLoss', 'Softmax', 'Softmax2d', 'Softmin', 'Softplus', 'Softshrink', 'Softsign', 'SyncBatchNorm', 'Tanh', 'Tanhshrink', 'Threshold', 'Transformer', 'TransformerDecoder', 'TransformerDecoderLayer', 'TransformerEncoder', 'TransformerEncoderLayer', 'TripletMarginLoss', 'TripletMarginWithDistanceLoss', 'Unflatten', 'Unfold', 'UninitializedBuffer', 'UninitializedParameter', 'Upsample', 'UpsamplingBilinear2d', 'UpsamplingNearest2d', 'ZeroPad1d', 'ZeroPad2d', 'ZeroPad3d', '_reduction', 'attention', 'common_types', 'factory_kwargs', 'functional', 'grad', 'init', 'intrinsic', 'modules', 'parallel', 'parameter', 'qat', 'quantizable', 'quantized', 'utils']
+__all__ = ['AdaptiveAvgPool1d', 'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d', 'AdaptiveLogSoftmaxWithLoss', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AlphaDropout', 'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'BCELoss', 'BCEWithLogitsLoss', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'Bilinear', 'CELU', 'CTCLoss', 'ChannelShuffle', 'ConstantPad1d', 'ConstantPad2d', 'ConstantPad3d', 'Container', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d', 'CosineEmbeddingLoss', 'CosineSimilarity', 'CrossEntropyLoss', 'CrossMapLRN2d', 'DataParallel', 'Dropout', 'Dropout1d', 'Dropout2d', 'Dropout3d', 'ELU', 'Embedding', 'EmbeddingBag', 'FeatureAlphaDropout', 'Flatten', 'Fold', 'FractionalMaxPool2d', 'FractionalMaxPool3d', 'GELU', 'GLU', 'GRU', 'GRUCell', 'GaussianNLLLoss', 'GroupNorm', 'Hardshrink', 'Hardsigmoid', 'Hardswish', 'Hardtanh', 'HingeEmbeddingLoss', 'HuberLoss', 'Identity', 'InstanceNorm1d', 'InstanceNorm2d', 'InstanceNorm3d', 'KLDivLoss', 'L1Loss', 'LPPool1d', 'LPPool2d', 'LSTM', 'LSTMCell', 'LayerNorm', 'LazyBatchNorm1d', 'LazyBatchNorm2d', 'LazyBatchNorm3d', 'LazyConv1d', 'LazyConv2d', 'LazyConv3d', 'LazyConvTranspose1d', 'LazyConvTranspose2d', 'LazyConvTranspose3d', 'LazyInstanceNorm1d', 'LazyInstanceNorm2d', 'LazyInstanceNorm3d', 'LazyLinear', 'LeakyReLU', 'Linear', 'LocalResponseNorm', 'LogSigmoid', 'LogSoftmax', 'MSELoss', 'MarginRankingLoss', 'MaxPool1d', 'MaxPool2d', 'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d', 'Mish', 'Module', 'ModuleDict', 'ModuleList', 'MultiLabelMarginLoss', 'MultiLabelSoftMarginLoss', 'MultiMarginLoss', 'MultiheadAttention', 'NLLLoss', 'NLLLoss2d', 'PReLU', 'PairwiseDistance', 'Parameter', 'ParameterDict', 'ParameterList', 'PixelShuffle', 'PixelUnshuffle', 'PoissonNLLLoss', 'RNN', 'RNNBase', 'RNNCell', 'RNNCellBase', 'RReLU', 'ReLU', 'ReLU6', 'ReflectionPad1d', 'ReflectionPad2d', 'ReflectionPad3d', 'ReplicationPad1d', 'ReplicationPad2d', 'ReplicationPad3d', 'SELU', 'Sequential', 'SiLU', 'Sigmoid', 'SmoothL1Loss', 'SoftMarginLoss', 'Softmax', 'Softmax2d', 'Softmin', 'Softplus', 'Softshrink', 'Softsign', 'SyncBatchNorm', 'Tanh', 'Tanhshrink', 'Threshold', 'Transformer', 'TransformerDecoder', 'TransformerDecoderLayer', 'TransformerEncoder', 'TransformerEncoderLayer', 'TripletMarginLoss', 'TripletMarginWithDistanceLoss', 'Unflatten', 'Unfold', 'UninitializedBuffer', 'UninitializedParameter', 'Upsample', 'UpsamplingBilinear2d', 'UpsamplingNearest2d', 'ZeroPad2d', '_reduction', 'common_types', 'factory_kwargs', 'functional', 'grad', 'init', 'intrinsic', 'modules', 'parallel', 'parameter', 'qat', 'quantizable', 'quantized', 'utils']

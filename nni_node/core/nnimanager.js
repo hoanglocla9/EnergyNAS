@@ -50,6 +50,7 @@ class NNIManager {
     waitingTrials;
     trialJobs;
     trialDataForTuner;
+    trialDataForResume;
     readonly;
     config;
     trialJobMetricListener;
@@ -60,6 +61,7 @@ class NNIManager {
         this.waitingTrials = [];
         this.trialJobs = new Map();
         this.trialDataForTuner = '';
+        this.trialDataForResume = '';
         this.readonly = false;
         this.log = log_1.getLogger('NNIManager');
         this.dataStore = component.get(datastore_1.DataStore);
@@ -111,6 +113,40 @@ class NNIManager {
     }
     async exportData() {
         return this.dataStore.exportTrialHpConfigs();
+    }
+    addRecoveredTrialJob(allTrialJobs) {
+        const jobs = allTrialJobs.filter((job) => job.status === 'WAITING' || job.status === 'RUNNING');
+        const trialData = [];
+        let maxSequeceId = 0;
+        for (const job of jobs) {
+            if (job.sequenceId === undefined || job.hyperParameters === undefined) {
+                this.log.warning('The trial to be recovered missing sequenceId and/or hyperParameters', job);
+                continue;
+            }
+            const params = job.hyperParameters[0];
+            const sequenceId = job.sequenceId;
+            maxSequeceId = Math.max(maxSequeceId, sequenceId);
+            const hyperParams = JSON.parse(params);
+            const packedParameter = {
+                parameter_id: hyperParams['parameter_id'],
+                parameter_source: 'resumed',
+                parameters: hyperParams['parameters'],
+                parameter_index: hyperParams['parameter_index'],
+            };
+            const form = {
+                id: job.trialJobId,
+                sequenceId: sequenceId,
+                hyperParameters: {
+                    value: JSON.stringify(packedParameter),
+                    index: 0
+                },
+            };
+            this.waitingTrials.push(form);
+            trialData.push(packedParameter);
+            this.dataStore.storeTrialJobEvent('ADD_RESUMED', job.trialJobId, '');
+        }
+        this.trialDataForResume = JSON.stringify(trialData);
+        this.experimentProfile.nextSequenceId = maxSequeceId + 1;
     }
     addCustomizedTrialJob(hyperParams) {
         if (this.readonly) {
@@ -195,9 +231,7 @@ class NNIManager {
         await this.setupTuner(dispatcherCommand, undefined, 'resume', checkpointDir);
         const allTrialJobs = await this.dataStore.listTrialJobs();
         this.currSubmittedTrialNum = allTrialJobs.length;
-        await Promise.all(allTrialJobs
-            .filter((job) => job.status === 'WAITING' || job.status === 'RUNNING')
-            .map((job) => this.dataStore.storeTrialJobEvent('FAILED', job.trialJobId)));
+        this.addRecoveredTrialJob(allTrialJobs);
         const finishedTrialData = await this.exportData();
         const importedData = await this.dataStore.getImportedData();
         let trialData = JSON.parse(finishedTrialData);
@@ -692,6 +726,12 @@ class NNIManager {
                         throw new Error('Dispatcher error: tuner has not been setup');
                     }
                     this.dispatcher.sendCommand(commands_1.IMPORT_DATA, this.trialDataForTuner);
+                }
+                if (this.trialDataForResume.length > 0) {
+                    if (this.dispatcher === undefined) {
+                        throw new Error('Dispatcher error: tuner has not been setup');
+                    }
+                    this.dispatcher.sendCommand(commands_1.ADD_CUSTOMIZED_TRIAL_JOB, this.trialDataForResume);
                 }
                 this.requestTrialJobs(this.experimentProfile.params.trialConcurrency);
                 break;

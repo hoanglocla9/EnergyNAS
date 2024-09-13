@@ -215,7 +215,8 @@ class TpeTuner(Tuner):
                 loss = -loss
             for key, value in param.items():
                 self._history[key].append(Record(value, loss))
-        _logger.info(f'Replayed {len(data)} trials')
+                self.dedup.add_history(param)
+        _logger.info(f'Replayed {len(data)} FINISHED trials')
 
 def suggest(args, rng, space, history):
     params = {}

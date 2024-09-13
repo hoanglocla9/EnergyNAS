@@ -49,6 +49,7 @@ const util_1 = require("../common/util");
 const gpuScheduler_1 = require("./gpuScheduler");
 const remoteMachineData_1 = require("./remoteMachineData");
 const remoteMachineJobRestServer_1 = require("./remoteMachineJobRestServer");
+const shellUtils_1 = require("common/shellUtils");
 let RemoteMachineTrainingService = class RemoteMachineTrainingService {
     initExecutorId = "initConnection";
     machineExecutorManagerMap;
@@ -178,7 +179,7 @@ let RemoteMachineTrainingService = class RemoteMachineTrainingService {
         this.metricsEmitter.off('metric', listener);
     }
     async submitTrialJob(form) {
-        const trialJobId = utils_1.uniqueString(5);
+        const trialJobId = form.id === undefined ? utils_1.uniqueString(5) : form.id;
         const trialJobDetail = new remoteMachineData_1.RemoteMachineTrialJobDetail(trialJobId, 'WAITING', Date.now(), "unset", form);
         this.jobQueue.push(trialJobId);
         this.trialJobsMap.set(trialJobId, trialJobDetail);
@@ -372,8 +373,8 @@ let RemoteMachineTrainingService = class RemoteMachineTrainingService {
         const version = this.versionCheck ? await utils_1.getVersion() : '';
         const runScriptTrialContent = executor.generateStartScript(trialJobDetail.workingDirectory, trialJobId, experimentStartupInfo_1.getExperimentId(), trialJobDetail.form.sequenceId.toString(), false, this.config.trialCommand, nniManagerIp, this.remoteRestServerPort, version, this.logCollection, cudaVisible);
         await util_1.execMkdir(path_1.default.join(trialLocalTempFolder, '.nni'));
-        await fs_1.default.promises.writeFile(path_1.default.join(trialLocalTempFolder, executor.getScriptName("install_nni")), containerJobData_1.CONTAINER_INSTALL_NNI_SHELL_FORMAT, { encoding: 'utf8' });
-        await fs_1.default.promises.writeFile(path_1.default.join(trialLocalTempFolder, executor.getScriptName("run")), runScriptTrialContent, { encoding: 'utf8' });
+        await shellUtils_1.createScriptFile(path_1.default.join(trialLocalTempFolder, executor.getScriptName("install_nni")), containerJobData_1.CONTAINER_INSTALL_NNI_SHELL_FORMAT);
+        await shellUtils_1.createScriptFile(path_1.default.join(trialLocalTempFolder, executor.getScriptName("run")), runScriptTrialContent);
         await this.writeParameterFile(trialJobId, form.hyperParameters);
         await executor.copyDirectoryToRemote(trialLocalTempFolder, trialJobDetail.workingDirectory);
         executor.executeScript(executor.joinPath(trialJobDetail.workingDirectory, executor.getScriptName("run")), true, true);

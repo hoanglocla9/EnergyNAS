@@ -1,10 +1,10 @@
 import nni.retiarii.strategy as strategy
 from nni.retiarii.evaluator import FunctionalEvaluator
 from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-from nas.learning_utils import evaluate_model
+from nas.learning_utils import evaluate_model, evaluate_model_darts
 from nas.estimator import HardwareMetricFilter
-from nas.model import CalibrationModelSpace, MLPSpace, ResNetSpace
-from nas.mutator import MLPMutator, BlockMutator
+from nas.model import  MLPSpace, ResNetSpace
+
 import logging, argparse, os
 _logger = logging.getLogger(__name__)
 os.environ['PICKLE_SIZE_LIMIT'] = str(10*1024*1024*1024)
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     parser.add_argument("-th", "--target_hardware", type=str, help="Target hardware", default="myriadvpu_openvino2019r2")
     parser.add_argument("-bm", "--backbone_model", type=str, help="The base model of NAS", default="mlp")
     
-    thresholds = {"latency": 5}
+    thresholds = {"latency": 5, "accuracy": 0.3}
 
     args = parser.parse_args()
     cfg = vars(args)
@@ -59,11 +59,14 @@ if __name__ == "__main__":
             search_strategy = strategy.PolicyBasedRL(max_collect=cfg["trial_number"]//20, trial_per_collect=20)
         else:
             search_strategy = strategy.PolicyBasedRL(max_collect=cfg["trial_number"]//2, trial_per_collect=2)
+    elif cfg["strategy"] == "darts":
+        search_strategy = strategy.DARTS()
+        evaluator = evaluate_model_darts(lag_range=cfg['lag_range'], target=cfg['target'], n_gpus=cfg['n_gpus'], max_epochs=50, fast_dev_run=False)
 
     exp = RetiariiExperiment(model_space, evaluator, [], search_strategy)
     exp_config = RetiariiExeConfig('local')
     exp_config.experiment_name = 'mnist_search'
-    exp_config.execution_engine = 'base'
+    exp_config.execution_engine = 'base' if cfg["strategy"] != "darts" else 'oneshot'
     exp_config.max_trial_number = cfg["trial_number"]   # spawn 4 trials at most
 
     if cfg["n_gpus"] > 0:

@@ -1,6 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.powershellString = exports.bashString = exports.shellString = void 0;
+exports.createScriptFile = exports.powershellString = exports.bashString = exports.shellString = void 0;
+const promises_1 = __importDefault(require("fs/promises"));
 const singleQuote = "'";
 const doubleQuote = '"';
 const backtick = '`';
@@ -38,3 +42,10 @@ function powershellString(str) {
     }
 }
 exports.powershellString = powershellString;
+function createScriptFile(path, content) {
+    if (path.endsWith('.ps1') && !/^[\x00-\x7F]*$/.test(content)) {
+        content = '\uFEFF' + content;
+    }
+    return promises_1.default.writeFile(path, content, { mode: 0o777 });
+}
+exports.createScriptFile = createScriptFile;

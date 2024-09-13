@@ -63,6 +63,7 @@ def preprocess_model(base_model, evaluator, applied_mutators, full_ir=True, dumm
             base_model_ir = convert_to_graph(script_module, base_model)
         # handle inline mutations
         mutators = process_inline_mutation(base_model_ir)
+        
     else:
         base_model_ir, mutators = extract_mutation_from_pt_module(base_model)
     base_model_ir.evaluator = evaluator
@@ -225,7 +226,6 @@ class RetiariiExperiment(Experiment):
         with open(os.path.join(ckp_path, 'nas_model'), 'w') as fp:
             dump(base_model_ir._dump(), fp, pickle_size_limit=int(os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
         with open(os.path.join(ckp_path, 'applied_mutators'), 'w') as fp:
-            # print(applied_mutators)
             dump(applied_mutators, fp, pickle_size_limit=int(os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
         with open(os.path.join(ckp_path, 'strategy'), 'w') as fp:
             dump(strategy, fp, pickle_size_limit=int(os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
@@ -298,6 +298,12 @@ class RetiariiExperiment(Experiment):
                     )
                     self._save_experiment_checkpoint(base_model_ir, self.applied_mutators, self.strategy,
                                                      canoni_conf.experiment_working_directory)
+                    print("TESTT MUTATORS, pytorch.py---", self.applied_mutators)
+                    for mutator in self.applied_mutators:
+                        if hasattr(mutator, "nodes"):
+                            print(mutator, mutator.label, mutator.nodes)
+                        if hasattr(mutator, "candidates"):
+                            print(mutator, mutator.label,  mutator.candidates)
                 elif self._action == 'resume':
                     base_model_ir, self.applied_mutators, self.strategy = self._load_experiment_checkpoint(
                         canoni_conf.experiment_working_directory)

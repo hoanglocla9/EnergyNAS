@@ -369,7 +369,6 @@ def dump_bytes(obj: Any, fp: Optional[Any] = None, *, compression: int = cast(in
 
 def _dump(*, obj: Any, fp: Optional[Any], use_trace: bool, pickle_size_limit: int,
           allow_nan: bool, **json_tricks_kwargs) -> Union[str, bytes]:
-    
     encoders = [
         # we don't need to check for dependency as many of those have already been required by NNI
         json_tricks.pathlib_encode,         # pathlib is a required dependency for NNI
@@ -388,7 +387,6 @@ def _dump(*, obj: Any, fp: Optional[Any], use_trace: bool, pickle_size_limit: in
     json_tricks_kwargs['allow_nan'] = allow_nan
 
     if fp is not None:
-        print(obj)
         return json_tricks.dump(obj, fp, obj_encoders=encoders, **json_tricks_kwargs)
     else:
         return json_tricks.dumps(obj, obj_encoders=encoders, **json_tricks_kwargs)

@@ -8,6 +8,24 @@ async function createDispatcherInterface() {
 exports.createDispatcherInterface = createDispatcherInterface;
 class WsIpcInterface {
     channel = websocket_channel_1.getWebSocketChannel();
+    commandListener;
+    errorListener;
+    constructor() {
+        this.channel.onCommand((command) => {
+            const commandType = command.slice(0, 2);
+            const content = command.slice(2);
+            if (commandType === 'ER') {
+                if (this.errorListener !== undefined) {
+                    this.errorListener(new Error(content));
+                }
+            }
+            else {
+                if (this.commandListener !== undefined) {
+                    this.commandListener(commandType, content);
+                }
+            }
+        });
+    }
     async init() {
         await this.channel.init();
     }
@@ -20,11 +38,9 @@ class WsIpcInterface {
         }
     }
     onCommand(listener) {
-        this.channel.onCommand((command) => {
-            listener(command.slice(0, 2), command.slice(2));
-        });
+        this.commandListener = listener;
     }
     onError(listener) {
-        this.channel.onError(listener);
+        this.errorListener = listener;
     }
 }

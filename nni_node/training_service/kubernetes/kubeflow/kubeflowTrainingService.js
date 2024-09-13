@@ -88,7 +88,7 @@ let KubeflowTrainingService = class KubeflowTrainingService extends kubernetesTr
         if (this.copyExpCodeDirPromise !== undefined) {
             await this.copyExpCodeDirPromise;
         }
-        const trialJobId = utils_1.uniqueString(5);
+        const trialJobId = form.id === undefined ? utils_1.uniqueString(5) : form.id;
         const trialWorkingFolder = path_1.default.join(this.CONTAINER_MOUNT_PATH, 'nni', experimentStartupInfo_1.getExperimentId(), trialJobId);
         const kubeflowJobName = `nni-exp-${this.experimentId}-trial-${trialJobId}`.toLowerCase();
         const trialLocalTempFolder = path_1.default.join(utils_1.getExperimentRootDir(), 'trials', trialJobId);

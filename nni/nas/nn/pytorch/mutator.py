@@ -79,6 +79,7 @@ class ValueChoiceMutator(Mutator):
             target = cast(Node, model.get_node_by_name(node.name))
             target.update_operation('prim::Constant', {'type': type(chosen).__name__, 'value': chosen})
 
+
 class ParameterChoiceLeafMutator(Mutator):
     # mutate the leaf node (i.e., ValueChoice) of parameter choices
     # should be used together with ParameterChoiceMutator

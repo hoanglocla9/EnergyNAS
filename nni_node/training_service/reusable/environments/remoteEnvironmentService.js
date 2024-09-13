@@ -42,6 +42,7 @@ const experimentStartupInfo_1 = require("common/experimentStartupInfo");
 const util_1 = require("training_service/common/util");
 const remoteMachineData_1 = require("training_service/remote_machine/remoteMachineData");
 const sharedStorage_1 = require("../sharedStorage");
+const shellUtils_1 = require("common/shellUtils");
 let RemoteEnvironmentService = class RemoteEnvironmentService extends environment_1.EnvironmentService {
     initExecutorId = "initConnection";
     machineExecutorManagerMap;
@@ -236,7 +237,7 @@ let RemoteEnvironmentService = class RemoteEnvironmentService extends environmen
         const environmentLocalTempFolder = path_1.default.join(this.experimentRootDir, "environment-temp");
         await executor.createFolder(environment.runnerWorkingFolder);
         await util_1.execMkdir(environmentLocalTempFolder);
-        await fs_1.default.promises.writeFile(path_1.default.join(environmentLocalTempFolder, executor.getScriptName("run")), environment.command, { encoding: 'utf8' });
+        await shellUtils_1.createScriptFile(path_1.default.join(environmentLocalTempFolder, executor.getScriptName("run")), environment.command);
         await executor.copyDirectoryToRemote(environmentLocalTempFolder, this.remoteExperimentRootDir);
         executor.executeScript(executor.joinPath(this.remoteExperimentRootDir, executor.getScriptName("run")), true, true);
         if (environment.rmMachineMeta === undefined) {

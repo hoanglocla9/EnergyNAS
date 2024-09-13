@@ -61,9 +61,9 @@ def reset_weights(m):
 
 @nni.retiarii.model_wrapper
 class MLPSpace(nn.Module):
-    @nni.trace
     class MLPBlock(nn.Module):
         def __init__(self, d_in, d_hidden, idx=-1):
+            super().__init__()
             self.linear = nn.Linear(d_in, d_hidden)
             self.activation = nn.ReLU()
             if idx == -1:
@@ -81,7 +81,7 @@ class MLPSpace(nn.Module):
         self.n_features = n_features
         d_hidden = nn.ValueChoice(range(4, 1025, 4), label="d_hidden")
         self.blocks = nn.Repeat(lambda idx: MLPSpace.MLPBlock(n_features, d_hidden, idx) if idx == 0 \
-                                        else MLPSpace.MLPBlock(d_hidden, d_hidden, idx), label="n_mlpblocks")
+                                        else MLPSpace.MLPBlock(d_hidden, d_hidden, idx), depth=(1, 10), label="n_mlpblocks")
         
         self.final_block = MLPSpace.MLPBlock(d_hidden, 1)
                 
@@ -93,7 +93,6 @@ class MLPSpace(nn.Module):
 
 @nni.retiarii.model_wrapper
 class ResNetSpace(nn.Module):
-    @nni.trace
     class ResNetBlock(nn.Module):
         def __init__(self, idx, d_in=33):
             super().__init__()
@@ -117,7 +116,6 @@ class ResNetSpace(nn.Module):
             x = self.linear_2(x)
             x = self.dropout_2(x)
             return x_input + x 
-    @nni.trace
     class ResNetHead(nn.Module):
         def __init__(self, d_in, d_out):
             super().__init__()

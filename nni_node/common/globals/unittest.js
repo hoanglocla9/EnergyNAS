@@ -7,6 +7,7 @@ exports.resetGlobals = void 0;
 const os_1 = __importDefault(require("os"));
 const path_1 = __importDefault(require("path"));
 const paths_1 = require("./paths");
+require("./shutdown");
 function resetGlobals() {
     const args = {
         port: 8080,

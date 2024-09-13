@@ -235,7 +235,7 @@ let PAITrainingService = class PAITrainingService {
     }
     async submitTrialJob(form) {
         this.log.info('submitTrialJob: form:', form);
-        const trialJobId = utils_2.uniqueString(5);
+        const trialJobId = form.id === undefined ? utils_2.uniqueString(5) : form.id;
         const trialWorkingFolder = path_1.default.join(this.expRootDir, 'trials', trialJobId);
         const paiJobName = `nni_exp_${this.experimentId}_trial_${trialJobId}`;
         const logPath = path_1.default.join(this.config.localStorageMountPoint, this.experimentId, trialJobId);

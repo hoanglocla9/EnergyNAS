@@ -154,7 +154,7 @@ class LocalTrainingService {
         this.eventEmitter.off('metric', listener);
     }
     submitTrialJob(form) {
-        const trialJobId = utils_1.uniqueString(5);
+        const trialJobId = form.id === undefined ? utils_1.uniqueString(5) : form.id;
         const trialJobDetail = new LocalTrialJobDetail(trialJobId, 'WAITING', Date.now(), path_1.default.join(this.rootDir, 'trials', trialJobId), form);
         this.jobQueue.push(trialJobId);
         this.jobMap.set(trialJobId, trialJobDetail);
@@ -373,7 +373,7 @@ class LocalTrainingService {
         await util_1.execMkdir(path_1.default.join(trialJobDetail.workingDirectory, '.nni'));
         await util_1.execNewFile(path_1.default.join(trialJobDetail.workingDirectory, '.nni', 'metrics'));
         const scriptName = util_1.getScriptName('run');
-        await fs_1.default.promises.writeFile(path_1.default.join(trialJobDetail.workingDirectory, scriptName), runScriptContent.join(utils_1.getNewLine()), { encoding: 'utf8', mode: 0o777 });
+        await shellUtils_1.createScriptFile(path_1.default.join(trialJobDetail.workingDirectory, scriptName), runScriptContent.join(utils_1.getNewLine()));
         await this.writeParameterFile(trialJobDetail.workingDirectory, trialJobDetail.form.hyperParameters);
         const trialJobProcess = util_1.runScript(path_1.default.join(trialJobDetail.workingDirectory, scriptName));
         this.setTrialJobStatus(trialJobDetail, 'RUNNING');

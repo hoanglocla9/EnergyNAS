@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.UnitTestHelpers = exports.serveWebSocket = exports.getWebSocketChannel = void 0;
 const strict_1 = __importDefault(require("assert/strict"));
 const events_1 = require("events");
-const ts_deferred_1 = require("ts-deferred");
+const deferred_1 = require("common/deferred");
 const log_1 = require("common/log");
 const logger = log_1.getLogger('tuner_command_channel.WebSocketChannel');
 function getWebSocketChannel() {
@@ -14,46 +14,40 @@ function getWebSocketChannel() {
 }
 exports.getWebSocketChannel = getWebSocketChannel;
 function serveWebSocket(ws) {
-    channelSingleton.setWebSocket(ws);
+    channelSingleton.serveWebSocket(ws);
 }
 exports.serveWebSocket = serveWebSocket;
 class WebSocketChannelImpl {
-    deferredInit = new ts_deferred_1.Deferred();
+    deferredInit = new deferred_1.Deferred();
     emitter = new events_1.EventEmitter();
     heartbeatTimer;
     serving = false;
     waitingPong = false;
     ws;
-    setWebSocket(ws) {
-        if (this.ws !== undefined) {
-            logger.error('A second client is trying to connect.');
-            ws.close(4030, 'Already serving a tuner');
-            return;
+    serveWebSocket(ws) {
+        if (this.ws === undefined) {
+            logger.debug('Connected.');
         }
-        if (this.deferredInit === null) {
-            logger.error('Connection timed out.');
-            ws.close(4080, 'Timeout');
-            return;
+        else {
+            logger.warning('Reconnecting. Drop previous connection.');
+            this.dropConnection('Reconnected');
         }
-        logger.debug('Connected.');
         this.serving = true;
         this.ws = ws;
-        ws.on('close', () => { this.handleError(new Error('tuner_command_channel: Tuner closed connection')); });
-        ws.on('error', this.handleError.bind(this));
-        ws.on('message', this.receive.bind(this));
-        ws.on('pong', () => { this.waitingPong = false; });
+        this.ws.on('close', this.handleWsClose);
+        this.ws.on('error', this.handleWsError);
+        this.ws.on('message', this.handleWsMessage);
+        this.ws.on('pong', this.handleWsPong);
         this.heartbeatTimer = setInterval(this.heartbeat.bind(this), heartbeatInterval);
         this.deferredInit.resolve();
-        this.deferredInit = null;
     }
     init() {
         if (this.ws === undefined) {
             logger.debug('Waiting connection...');
             setTimeout(() => {
-                if (this.deferredInit !== null) {
+                if (!this.deferredInit.settled) {
                     const msg = 'Tuner did not connect in 10 seconds. Please check tuner (dispatcher) log.';
                     this.deferredInit.reject(new Error('tuner_command_channel: ' + msg));
-                    this.deferredInit = null;
                 }
             }, 10000);
             return this.deferredInit.promise;
@@ -85,6 +79,40 @@ class WebSocketChannelImpl {
     onError(callback) {
         this.emitter.on('error', callback);
     }
+    handleWsClose = () => {
+        this.handleError(new Error('tuner_command_channel: Tuner closed connection'));
+    };
+    handleWsError = (error) => {
+        this.handleError(error);
+    };
+    handleWsMessage = (data, _isBinary) => {
+        this.receive(data);
+    };
+    handleWsPong = () => {
+        this.waitingPong = false;
+    };
+    dropConnection(reason) {
+        if (this.ws === undefined) {
+            return;
+        }
+        this.serving = false;
+        this.waitingPong = false;
+        clearInterval(this.heartbeatTimer);
+        this.ws.off('close', this.handleWsClose);
+        this.ws.off('error', this.handleWsError);
+        this.ws.off('message', this.handleWsMessage);
+        this.ws.off('pong', this.handleWsPong);
+        this.ws.on('close', () => {
+            logger.info('Connection dropped');
+        });
+        this.ws.on('message', (data, _isBinary) => {
+            logger.error('Received message after reconnect:', data);
+        });
+        this.ws.on('pong', () => {
+            logger.error('Received pong after reconnect.');
+        });
+        this.ws.close(1001, reason);
+    }
     heartbeat() {
         if (this.waitingPong) {
             this.ws.terminate();
@@ -93,7 +121,7 @@ class WebSocketChannelImpl {
         this.waitingPong = true;
         this.ws.ping();
     }
-    receive(data, _isBinary) {
+    receive(data) {
         logger.debug('Received', data);
         this.emitter.emit('command', data.toString());
     }

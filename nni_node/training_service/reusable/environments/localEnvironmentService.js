@@ -134,7 +134,7 @@ let LocalEnvironmentService = class LocalEnvironmentService extends environment_
         await util_1.execMkdir(environment.runnerWorkingFolder);
         environment.command = this.getScript(environment).join(utils_1.getNewLine());
         const scriptName = util_1.getScriptName('run');
-        await fs_1.default.promises.writeFile(path_1.default.join(localEnvCodeFolder, scriptName), environment.command, { encoding: 'utf8', mode: 0o777 });
+        await shellUtils_1.createScriptFile(path_1.default.join(localEnvCodeFolder, scriptName), environment.command);
         util_1.runScript(path_1.default.join(localEnvCodeFolder, scriptName));
         environment.trackingUrl = `${environment.runnerWorkingFolder}`;
     }

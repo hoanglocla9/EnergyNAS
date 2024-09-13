@@ -120,7 +120,7 @@ let AdlTrainingService = class AdlTrainingService extends kubernetesTrainingServ
             const restServer = component.get(adlJobRestServer_1.AdlJobRestServer);
             this.kubernetesRestServerPort = restServer.clusterRestServerPort;
         }
-        const trialJobId = utils_1.uniqueString(5);
+        const trialJobId = form.id === undefined ? utils_1.uniqueString(5) : form.id;
         const adlJobName = `nni-exp-${this.experimentId}-trial-${trialJobId}`.toLowerCase();
         const initStatus = 'WAITING';
         const codeDir = this.adlTrialConfig.codeDir;

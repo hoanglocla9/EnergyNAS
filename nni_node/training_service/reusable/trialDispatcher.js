@@ -141,7 +141,7 @@ let TrialDispatcher = TrialDispatcher_1 = class TrialDispatcher {
         throw new errors_1.MethodNotImplementedError();
     }
     async submitTrialJob(form) {
-        const trialId = utils_1.uniqueString(5);
+        const trialId = form.id === undefined ? utils_1.uniqueString(5) : form.id;
         const trialJobDetail = new trial_1.TrialDetail(trialId, "WAITING", Date.now(), "", form);
         this.trials.set(trialId, trialJobDetail);
         return trialJobDetail;
