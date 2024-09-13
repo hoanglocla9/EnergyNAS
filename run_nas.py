@@ -68,7 +68,7 @@ if __name__ == "__main__":
     exp_config.experiment_name = 'mnist_search'
     exp_config.execution_engine = 'base' if cfg["strategy"] != "darts" else 'oneshot'
     exp_config.max_trial_number = cfg["trial_number"]   # spawn 4 trials at most
-
+    exp_config.experimentWorkingDirectory = "./nni-experiments/"
     if cfg["n_gpus"] > 0:
         exp_config.trial_concurrency = cfg["n_gpus"]# will run two trials concurrently
         exp_config.trial_gpu_number = cfg["n_gpus"]
