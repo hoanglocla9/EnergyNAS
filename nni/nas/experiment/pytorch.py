@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-__all__ = ['RetiariiExeConfig', 'RetiariiExperiment', 'preprocess_model', 'debug_mutated_model']
+__all__ = ['RetiariiExeConfig', 'RetiariiExperiment',
+           'preprocess_model', 'debug_mutated_model']
 
 import logging
 import os
@@ -47,23 +48,26 @@ _logger = logging.getLogger(__name__)
 def preprocess_model(base_model, evaluator, applied_mutators, full_ir=True, dummy_input=None, oneshot=False):
     # TODO: this logic might need to be refactored into execution engine
     if oneshot:
-        base_model_ir, mutators = process_oneshot_mutations(base_model, evaluator)
+        base_model_ir, mutators = process_oneshot_mutations(
+            base_model, evaluator)
     elif full_ir:
         try:
             script_module = torch.jit.script(base_model)
         except Exception as e:
-            _logger.error('Your base model cannot be parsed by torch.jit.script, please fix the following error:')
+            _logger.error(
+                'Your base model cannot be parsed by torch.jit.script, please fix the following error:')
             raise e
         if dummy_input is not None:
             # FIXME: this is a workaround as full tensor is not supported in configs
             dummy_input = torch.randn(*dummy_input)
             converter = GraphConverterWithShape()
-            base_model_ir = convert_to_graph(script_module, base_model, converter, dummy_input=dummy_input)
+            base_model_ir = convert_to_graph(
+                script_module, base_model, converter, dummy_input=dummy_input)
         else:
             base_model_ir = convert_to_graph(script_module, base_model)
         # handle inline mutations
         mutators = process_inline_mutation(base_model_ir)
-        
+
     else:
         base_model_ir, mutators = extract_mutation_from_pt_module(base_model)
     base_model_ir.evaluator = evaluator
@@ -75,7 +79,8 @@ def preprocess_model(base_model, evaluator, applied_mutators, full_ir=True, dumm
         applied_mutators = mutators
 
     # Add mutations on evaluators
-    applied_mutators += process_evaluator_mutations(evaluator, applied_mutators)
+    applied_mutators += process_evaluator_mutations(
+        evaluator, applied_mutators)
 
     return base_model_ir, applied_mutators
 
@@ -99,7 +104,8 @@ def debug_mutated_model(base_model, evaluator, applied_mutators):
     applied_mutators : list
         a list of mutators that will be applied on the base model for generating a new model
     """
-    base_model_ir, applied_mutators = preprocess_model(base_model, evaluator, applied_mutators)
+    base_model_ir, applied_mutators = preprocess_model(
+        base_model, evaluator, applied_mutators)
     from nni.nas.strategy.debug import _LocalDebugStrategy
     strategy = _LocalDebugStrategy()
     strategy.run(base_model_ir, applied_mutators)
@@ -196,9 +202,10 @@ class RetiariiExperiment(Experiment):
             # check for sanity
             if not is_model_wrapped(base_model):
                 warnings.warn(colorama.Style.BRIGHT + colorama.Fore.RED +
-                    '`@model_wrapper` is missing for the base model. The experiment might still be able to run, '
-                    'but it may cause inconsistent behavior compared to the time when you add it.' + colorama.Style.RESET_ALL,
-                    RuntimeWarning)
+                              '`@model_wrapper` is missing for the base model. The experiment might still be able to run, '
+                              'but it may cause inconsistent behavior compared to the time when you add it.' +
+                              colorama.Style.RESET_ALL,
+                              RuntimeWarning)
 
         self.base_model = base_model
         self.evaluator: Evaluator = evaluator
@@ -210,7 +217,8 @@ class RetiariiExperiment(Experiment):
 
     def _run_strategy(self, base_model_ir: Model, applied_mutators: List[Mutator]) -> None:
         _logger.info('Start strategy...')
-        search_space = dry_run_for_formatted_search_space(base_model_ir, applied_mutators)
+        search_space = dry_run_for_formatted_search_space(
+            base_model_ir, applied_mutators)
         self.update_search_space(search_space)
         self.strategy.run(base_model_ir, applied_mutators)
         _logger.info('Strategy exit')
@@ -224,11 +232,14 @@ class RetiariiExperiment(Experiment):
                                     strategy: BaseStrategy, exp_work_dir: PathLike) -> None:
         ckp_path = os.path.join(exp_work_dir, self.id, 'checkpoint')
         with open(os.path.join(ckp_path, 'nas_model'), 'w') as fp:
-            dump(base_model_ir._dump(), fp, pickle_size_limit=int(os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
+            dump(base_model_ir._dump(), fp, pickle_size_limit=int(
+                os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
         with open(os.path.join(ckp_path, 'applied_mutators'), 'w') as fp:
-            dump(applied_mutators, fp, pickle_size_limit=int(os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
+            dump(applied_mutators, fp, pickle_size_limit=int(
+                os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
         with open(os.path.join(ckp_path, 'strategy'), 'w') as fp:
-            dump(strategy, fp, pickle_size_limit=int(os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
+            dump(strategy, fp, pickle_size_limit=int(
+                os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
 
     def _load_experiment_checkpoint(self, exp_work_dir: PathLike) -> Tuple[Model, List[Mutator], BaseStrategy]:
         ckp_path = os.path.join(exp_work_dir, self.id, 'checkpoint')
@@ -247,7 +258,8 @@ class RetiariiExperiment(Experiment):
         while `run` waits the experiment to complete. RetiariiExperiment always waits the experiment
         to complete as strategy runs in foreground.
         """
-        raise NotImplementedError('RetiariiExperiment is not supposed to provide `start` method')
+        raise NotImplementedError(
+            'RetiariiExperiment is not supposed to provide `start` method')
 
     def run(self,
             config: RetiariiExeConfig | None = None,
@@ -275,16 +287,19 @@ class RetiariiExperiment(Experiment):
             self.config = config
 
         if isinstance(self.config.execution_engine, OneshotEngineConfig) \
-            or (isinstance(self.config.execution_engine, str) and self.config.execution_engine == 'oneshot'):
+                or (isinstance(self.config.execution_engine, str) and self.config.execution_engine == 'oneshot'):
             # this is hacky, will be refactored when oneshot can run on training services
-            base_model_ir, self.applied_mutators = preprocess_model(self.base_model, self.evaluator, self.applied_mutators, oneshot=True)
+            base_model_ir, self.applied_mutators = preprocess_model(
+                self.base_model, self.evaluator, self.applied_mutators, oneshot=True)
             self.strategy.run(base_model_ir, self.applied_mutators)
         else:
             ws_url = f'ws://localhost:{port}/tuner'
-            canoni_conf = self._start_impl(port, debug, RunMode.Background, ws_url, ['retiarii'])
+            canoni_conf = self._start_impl(
+                port, debug, RunMode.Background, ws_url, ['retiarii'])
             canoni_conf = cast(RetiariiExeConfig, canoni_conf)
             self._dispatcher = RetiariiAdvisor(ws_url)
-            self._dispatcher_thread = Thread(target=self._dispatcher.run, daemon=True)
+            self._dispatcher_thread = Thread(
+                target=self._dispatcher.run, daemon=True)
             self._dispatcher_thread.start()
             # FIXME: engine cannot be created twice
             self._create_execution_engine(canoni_conf)
@@ -292,23 +307,24 @@ class RetiariiExperiment(Experiment):
                 if self._action == 'create':
                     base_model_ir, self.applied_mutators = preprocess_model(
                         self.base_model, self.evaluator, self.applied_mutators,
-                        full_ir=not isinstance(canoni_conf.execution_engine, (PyEngineConfig, BenchmarkEngineConfig)),
+                        full_ir=not isinstance(
+                            canoni_conf.execution_engine, (PyEngineConfig, BenchmarkEngineConfig)),
                         dummy_input=canoni_conf.execution_engine.dummy_input
-                            if isinstance(canoni_conf.execution_engine, (BaseEngineConfig, CgoEngineConfig)) else None
+                        if isinstance(canoni_conf.execution_engine, (BaseEngineConfig, CgoEngineConfig)) else None
                     )
                     self._save_experiment_checkpoint(base_model_ir, self.applied_mutators, self.strategy,
                                                      canoni_conf.experiment_working_directory)
-                    print("TESTT MUTATORS, pytorch.py---", self.applied_mutators)
-                    for mutator in self.applied_mutators:
-                        if hasattr(mutator, "nodes"):
-                            print(mutator, mutator.label, mutator.nodes)
-                        if hasattr(mutator, "candidates"):
-                            print(mutator, mutator.label,  mutator.candidates)
+                    # for mutator in self.applied_mutators:
+                    #     if hasattr(mutator, "nodes"):
+                    #         print(mutator, mutator.label, mutator.nodes)
+                    #     if hasattr(mutator, "candidates"):
+                    #         print(mutator, mutator.label,  mutator.candidates)
                 elif self._action == 'resume':
                     base_model_ir, self.applied_mutators, self.strategy = self._load_experiment_checkpoint(
                         canoni_conf.experiment_working_directory)
                 else:
-                    raise RuntimeError(f'The experiment mode "{self._action}" is not supposed to invoke run() method.')
+                    raise RuntimeError(
+                        f'The experiment mode "{self._action}" is not supposed to invoke run() method.')
 
                 self._run_strategy(base_model_ir, self.applied_mutators)
                 # FIXME: move this logic to strategy with a new API provided by execution engine
@@ -316,7 +332,8 @@ class RetiariiExperiment(Experiment):
             except KeyboardInterrupt:
                 _logger.warning('KeyboardInterrupt detected')
                 self.stop()
-            _logger.info('Search process is done, the experiment is still alive, `stop()` can terminate the experiment.')
+            _logger.info(
+                'Search process is done, the experiment is still alive, `stop()` can terminate the experiment.')
 
     def stop(self) -> None:
         """
@@ -368,8 +385,10 @@ class RetiariiExperiment(Experiment):
             # when strategy hasn't implemented its own export logic
             all_models = filter(lambda m: m.metric is not None, list_models())
             assert optimize_mode in ['maximize', 'minimize']
-            all_models = sorted(all_models, key=lambda m: cast(float, m.metric), reverse=optimize_mode == 'maximize')
-            assert formatter in ['code', 'dict'], 'Export formatter other than "code" and "dict" is not supported yet.'
+            all_models = sorted(all_models, key=lambda m: cast(
+                float, m.metric), reverse=optimize_mode == 'maximize')
+            assert formatter in [
+                'code', 'dict'], 'Export formatter other than "code" and "dict" is not supported yet.'
             if formatter == 'code':
                 return [model_to_pytorch_script(model) for model in all_models[:top_k]]
             elif formatter == 'dict':
@@ -391,7 +410,8 @@ class RetiariiExperiment(Experiment):
         """
         experiment = RetiariiExperiment._view(experiment_id)
         # view is nothing specific about RetiariiExperiment, directly using the method in base experiment class
-        super(RetiariiExperiment, experiment).start(port=port, debug=False, run_mode=RunMode.Detach)
+        super(RetiariiExperiment, experiment).start(
+            port=port, debug=False, run_mode=RunMode.Detach)
         if non_blocking:
             return experiment
         else:
@@ -428,7 +448,8 @@ class RetiariiExperiment(Experiment):
         exp = RetiariiExperiment(cast(nn.Module, None))
         exp.id = exp_id
         exp._action = 'resume'
-        exp.config = cast(RetiariiExeConfig, launcher.get_stopped_experiment_config(exp_id, exp_dir))
+        exp.config = cast(
+            RetiariiExeConfig, launcher.get_stopped_experiment_config(exp_id, exp_dir))
         return exp
 
     @staticmethod
@@ -436,5 +457,6 @@ class RetiariiExperiment(Experiment):
         exp = RetiariiExperiment(cast(nn.Module, None))
         exp.id = exp_id
         exp._action = 'view'
-        exp.config = cast(RetiariiExeConfig, launcher.get_stopped_experiment_config(exp_id, exp_dir))
+        exp.config = cast(
+            RetiariiExeConfig, launcher.get_stopped_experiment_config(exp_id, exp_dir))
         return exp

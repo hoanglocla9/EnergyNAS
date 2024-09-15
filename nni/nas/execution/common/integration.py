@@ -51,14 +51,18 @@ class RetiariiAdvisor(MsgDispatcherBase):
 
     def __init__(self, url: str):
         super().__init__(url)
-        register_advisor(self)  # register the current advisor as the "global only" advisor
+        # register the current advisor as the "global only" advisor
+        register_advisor(self)
         self.search_space = None
 
         self.send_trial_callback: Optional[Callable[[dict], None]] = None
-        self.request_trial_jobs_callback: Optional[Callable[[int], None]] = None
+        self.request_trial_jobs_callback: Optional[Callable[[
+            int], None]] = None
         self.trial_end_callback: Optional[Callable[[int, bool], None]] = None
-        self.intermediate_metric_callback: Optional[Callable[[int, MetricData], None]] = None
-        self.final_metric_callback: Optional[Callable[[int, MetricData], None]] = None
+        self.intermediate_metric_callback: Optional[Callable[[
+            int, MetricData], None]] = None
+        self.final_metric_callback: Optional[Callable[[
+            int, MetricData], None]] = None
 
         self.parameters_count = 0
         # Sometimes messages arrive first before the callbacks get registered.
@@ -81,7 +85,8 @@ class RetiariiAdvisor(MsgDispatcherBase):
         self.send_trial_callback = callbacks.get('send_trial')
         self.request_trial_jobs_callback = callbacks.get('request_trial_jobs')
         self.trial_end_callback = callbacks.get('trial_end')
-        self.intermediate_metric_callback = callbacks.get('intermediate_metric')
+        self.intermediate_metric_callback = callbacks.get(
+            'intermediate_metric')
         self.final_metric_callback = callbacks.get('final_metric')
 
         self.process_queued_callbacks()
@@ -94,19 +99,24 @@ class RetiariiAdvisor(MsgDispatcherBase):
         processed_idx = []
         for queue_idx, (call_name, call_args) in enumerate(self.call_queue):
             if call_name == 'send_trial' and self.send_trial_callback is not None:
-                self.send_trial_callback(*call_args)  # pylint: disable=not-callable
+                self.send_trial_callback(
+                    *call_args)  # pylint: disable=not-callable
                 processed_idx.append(queue_idx)
             if call_name == 'request_trial_jobs' and self.request_trial_jobs_callback is not None:
-                self.request_trial_jobs_callback(*call_args)  # pylint: disable=not-callable
+                self.request_trial_jobs_callback(
+                    *call_args)  # pylint: disable=not-callable
                 processed_idx.append(queue_idx)
             if call_name == 'trial_end' and self.trial_end_callback is not None:
-                self.trial_end_callback(*call_args)  # pylint: disable=not-callable
+                self.trial_end_callback(
+                    *call_args)  # pylint: disable=not-callable
                 processed_idx.append(queue_idx)
             if call_name == 'intermediate_metric' and self.intermediate_metric_callback is not None:
-                self.intermediate_metric_callback(*call_args)  # pylint: disable=not-callable
+                self.intermediate_metric_callback(
+                    *call_args)  # pylint: disable=not-callable
                 processed_idx.append(queue_idx)
             if call_name == 'final_metric' and self.final_metric_callback is not None:
-                self.final_metric_callback(*call_args)  # pylint: disable=not-callable
+                self.final_metric_callback(
+                    *call_args)  # pylint: disable=not-callable
                 processed_idx.append(queue_idx)
 
         # Remove processed messages
@@ -138,21 +148,27 @@ class RetiariiAdvisor(MsgDispatcherBase):
         if not 'gpus' in placement_constraint:
             raise ValueError('placement_constraint must have `gpus`')
         if placement_constraint['type'] not in ['None', 'GPUNumber', 'Device']:
-            raise ValueError('placement_constraint.type must be either `None`,. `GPUNumber` or `Device`')
+            raise ValueError(
+                'placement_constraint.type must be either `None`,. `GPUNumber` or `Device`')
         if placement_constraint['type'] == 'None' and len(placement_constraint['gpus']) > 0:
-            raise ValueError('placement_constraint.gpus must be an empty list when type == None')
+            raise ValueError(
+                'placement_constraint.gpus must be an empty list when type == None')
         if placement_constraint['type'] == 'GPUNumber':
             if len(placement_constraint['gpus']) != 1:
-                raise ValueError('placement_constraint.gpus currently only support one host when type == GPUNumber')
+                raise ValueError(
+                    'placement_constraint.gpus currently only support one host when type == GPUNumber')
             for e in placement_constraint['gpus']:
                 if not isinstance(e, int):
-                    raise ValueError('placement_constraint.gpus must be a list of number when type == GPUNumber')
+                    raise ValueError(
+                        'placement_constraint.gpus must be a list of number when type == GPUNumber')
         if placement_constraint['type'] == 'Device':
             for e in placement_constraint['gpus']:
                 if not isinstance(e, tuple):
-                    raise ValueError('placement_constraint.gpus must be a list of tuple when type == Device')
+                    raise ValueError(
+                        'placement_constraint.gpus must be a list of tuple when type == Device')
                 if not (len(e) == 2 and isinstance(e[0], str) and isinstance(e[1], int)):
-                    raise ValueError('placement_constraint.gpus`s tuple must be (str, int)')
+                    raise ValueError(
+                        'placement_constraint.gpus`s tuple must be (str, int)')
 
     def send_trial(self, parameters, placement_constraint=None):
         """
@@ -190,7 +206,8 @@ class RetiariiAdvisor(MsgDispatcherBase):
         _logger.debug('New trial sent: %s', new_trial)
 
         try:
-            send_payload = nni.dump(new_trial, pickle_size_limit=int(os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
+            send_payload = nni.dump(new_trial, pickle_size_limit=int(
+                os.getenv('PICKLE_SIZE_LIMIT', 64 * 1024)))
         except PayloadTooLarge:
             raise ValueError(
                 'Serialization failed when trying to dump the model because payload too large (larger than 64 KB). '
@@ -230,7 +247,8 @@ class RetiariiAdvisor(MsgDispatcherBase):
     def handle_report_metric_data(self, data):
         # TODO: we should properly handle the trials in self._customized_parameter_ids instead of ignoring
         if self.is_created_in_previous_exp(data['parameter_id']):
-            _logger.info('The metrics of the recovered trial %d are ignored', data['parameter_id'])
+            _logger.info(
+                'The metrics of the recovered trial %d are ignored', data['parameter_id'])
             return
         # NOTE: this part is not aligned with hpo tuners.
         # in hpo tuners, trial_job_id is used for intermediate results handling
@@ -239,15 +257,19 @@ class RetiariiAdvisor(MsgDispatcherBase):
         if data['type'] == MetricType.REQUEST_PARAMETER:
             raise ValueError('Request parameter not supported')
         elif data['type'] == MetricType.PERIODICAL:
-            self.invoke_callback('intermediate_metric', data['parameter_id'], self._process_value(data['value']))
+            self.invoke_callback(
+                'intermediate_metric', data['parameter_id'], self._process_value(data['value']))
         elif data['type'] == MetricType.FINAL:
-            self.invoke_callback('final_metric', data['parameter_id'], self._process_value(data['value']))
+            self.invoke_callback(
+                'final_metric', data['parameter_id'], self._process_value(data['value']))
 
     @staticmethod
     def _process_value(value) -> Any:  # hopefully a float
         value = nni.load(value)
         if isinstance(value, dict):
-            if 'default' in value:
+            if 'moo' in value:
+                return value['moo']
+            elif 'default' in value:
                 return value['default']
             else:
                 return value

@@ -23,6 +23,7 @@ from .codegen import model_to_pytorch_script
 
 _logger = logging.getLogger(__name__)
 
+
 class BaseGraphData:
     """
     Data sent between strategy and trial, in graph-based execution engine.
@@ -36,6 +37,7 @@ class BaseGraphData:
     mutation_summary
         a dict of all the choices during mutations in the HPO search space format
     """
+
     def __init__(self, model_script: str, evaluator: Evaluator, mutation_summary: dict) -> None:
         self.model_script = model_script
         self.evaluator = evaluator
@@ -109,7 +111,8 @@ class BaseExecutionEngine(AbstractExecutionEngine):
     def _send_trial_callback(self, paramater: dict) -> None:
         if self.resources <= 0:
             # FIXME: should be a warning message here
-            _logger.debug('There is no available resource, but trial is submitted.')
+            _logger.debug(
+                'There is no available resource, but trial is submitted.')
         self.resources -= 1
         _logger.debug('Resource used. Remaining: %d', self.resources)
 
@@ -149,7 +152,8 @@ class BaseExecutionEngine(AbstractExecutionEngine):
     def pack_model_data(cls, model: Model) -> Any:
         mutation_summary = get_mutation_summary(model)
         assert model.evaluator is not None, 'Model evaluator can not be None'
-        return BaseGraphData(model_to_pytorch_script(model), model.evaluator, mutation_summary)  # type: ignore
+        # type: ignore
+        return BaseGraphData(model_to_pytorch_script(model), model.evaluator, mutation_summary)
 
     @classmethod
     def trial_execute_graph(cls) -> None:
@@ -157,7 +161,8 @@ class BaseExecutionEngine(AbstractExecutionEngine):
         Initialize the model, hand it over to trainer.
         """
         graph_data = BaseGraphData.load(receive_trial_parameters())
-        random_str = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
+        random_str = ''.join(random.choice(
+            string.ascii_uppercase + string.digits) for _ in range(6))
         file_name = f'_generated_model/{random_str}.py'
         os.makedirs(os.path.dirname(file_name), exist_ok=True)
         with open(file_name, 'w') as f:

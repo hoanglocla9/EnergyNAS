@@ -99,10 +99,12 @@ class MsgDispatcher(MsgDispatcherBase):
         # data: number or trial jobs
         ids = [_create_parameter_id() for _ in range(data)]
         _logger.debug("requesting for generating params of %s", ids)
-        params_list = self.tuner.generate_multiple_parameters(ids, st_callback=self.send_trial_callback)
+        params_list = self.tuner.generate_multiple_parameters(
+            ids, st_callback=self.send_trial_callback)
 
         for i, _ in enumerate(params_list):
-            self.send(CommandType.NewTrialJob, _pack_parameter(ids[i], params_list[i]))
+            self.send(CommandType.NewTrialJob,
+                      _pack_parameter(ids[i], params_list[i]))
         # when parameters is None.
         if len(params_list) < len(ids):
             self.send(CommandType.NoMoreTrialJobs, _pack_parameter(ids[0], ''))
@@ -115,7 +117,8 @@ class MsgDispatcher(MsgDispatcherBase):
         data: a list of dictionaries, each of which has at least two keys, 'parameter' and 'value'
         """
         for entry in data:
-            entry['value'] = entry['value'] if type(entry['value']) is str else dump(entry['value'])
+            entry['value'] = entry['value'] if type(
+                entry['value']) is str else dump(entry['value'])
             entry['value'] = load(entry['value'])
         self.tuner.import_data(data)
 
@@ -136,7 +139,8 @@ class MsgDispatcher(MsgDispatcherBase):
             if data['type'] == MetricType.FINAL:
                 # only deal with final metric using import data
                 param = self.get_previous_param(data['parameter_id'])
-                trial_data = [{'parameter': param, 'value': load(data['value'])}]
+                trial_data = [{'parameter': param,
+                               'value': load(data['value'])}]
                 self.handle_import_data(trial_data)
             return
         # metrics value is dumped as json string in trial, so we need to decode it here
@@ -153,13 +157,15 @@ class MsgDispatcher(MsgDispatcherBase):
             assert data['parameter_index'] is not None
             param_id = _create_parameter_id()
             try:
-                param = self.tuner.generate_parameters(param_id, trial_job_id=data['trial_job_id'])
+                param = self.tuner.generate_parameters(
+                    param_id, trial_job_id=data['trial_job_id'])
             except NoMoreTrialError:
                 param = None
             self.send(CommandType.SendTrialJobParameter, _pack_parameter(param_id, param, trial_job_id=data['trial_job_id'],
-                                                                    parameter_index=data['parameter_index']))
+                                                                         parameter_index=data['parameter_index']))
         else:
-            raise ValueError('Data type not supported: {}'.format(data['type']))
+            raise ValueError(
+                'Data type not supported: {}'.format(data['type']))
 
     def handle_trial_end(self, data):
         """
@@ -177,7 +183,8 @@ class MsgDispatcher(MsgDispatcherBase):
         if trial_job_id in _trial_history:
             _trial_history.pop(trial_job_id)
             if self.assessor is not None:
-                self.assessor.trial_end(trial_job_id, data['event'] == 'SUCCEEDED')
+                self.assessor.trial_end(
+                    trial_job_id, data['event'] == 'SUCCEEDED')
         if self.tuner is not None:
             self.tuner.trial_end(id_, data['event'] == 'SUCCEEDED')
 
@@ -199,7 +206,8 @@ class MsgDispatcher(MsgDispatcherBase):
             self.tuner.receive_trial_result(id_, _trial_params[id_], value, customized=customized,
                                             trial_job_id=data.get('trial_job_id'))
         else:
-            _logger.warning('Find unknown job parameter id %s, maybe something goes wrong.', id_)
+            _logger.warning(
+                'Find unknown job parameter id %s, maybe something goes wrong.', id_)
             _logger.warning('_trial_params %s', _trial_params)
 
     def _handle_intermediate_metric_data(self, data):
@@ -217,7 +225,8 @@ class MsgDispatcher(MsgDispatcherBase):
         history = _trial_history[trial_job_id]
         history[data['sequence']] = data['value']
         ordered_history = _sort_history(history)
-        if len(ordered_history) < data['sequence']:  # no user-visible update since last time
+        # no user-visible update since last time
+        if len(ordered_history) < data['sequence']:
             return
 
         try:

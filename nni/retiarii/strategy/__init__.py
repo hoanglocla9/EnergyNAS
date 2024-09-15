@@ -3,7 +3,7 @@
 
 from .base import BaseStrategy
 from .bruteforce import Random, GridSearch
-from .evolution import RegularizedEvolution
+from .evolution import RegularizedEvolution, MultiObjectiveRegularizedEvolution
 from .tpe_strategy import TPEStrategy, TPE
 from .rl import PolicyBasedRL
 from .oneshot import DARTS, Proxyless, GumbelDARTS, ENAS, RandomOneShot
