@@ -19,7 +19,7 @@ class HardwareMetricEstimator:
         self.predictor_name = applied_hardware
         self.predictor = nn_meter.load_predictor(applied_hardware, hardware_metrics)
 
-    def estimate(self, model, dummy_input=(1, 1, 33)):
+    def estimate(self, model, dummy_input=(1,33)):
         path = inspect.getfile(model.__class__)
         dir_path = path.split("/")[-2]
         file_name = path.split("/")[-1].split(".")[0]

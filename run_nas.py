@@ -46,7 +46,7 @@ if __name__ == "__main__":
     elif cfg['backbone_model'] == 'resnet':
         model_space = ResNetSpace(n_features=cfg['lag_range']+7)
     elif cfg['backbone_model'] == 'fttransformer':
-        model_space = FTTransformerSpace(d_numerical=cfg['lag_range']+7)
+        model_space = FTTransformerSpace(n_features=cfg['lag_range']+7)
     else:
         raise Exception('Not support this backbone model yet!')
 

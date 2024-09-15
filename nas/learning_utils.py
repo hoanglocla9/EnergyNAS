@@ -99,12 +99,12 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
         train_loader = nni.trace(DataLoader)(dataset, batch_size=512, sampler=train_subsampler)
         valid_loader = nni.trace(DataLoader)(dataset, batch_size=512, sampler=valid_subsampler)
         model = model_cls()
-        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-        model.to(device) 
-
-        dummy_input = torch.zeros(1, 1, 33).to(device)
+        dummy_input = torch.zeros(1, 1, 33)
         torch.onnx.export(model, (dummy_input, ), os.path.join(os.environ['NNI_OUTPUT_DIR'], 'model.onnx'))
 
+        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        model.to(device) 
+        
         # model.apply(reset_weights)
         optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
         min_loss_list = []
