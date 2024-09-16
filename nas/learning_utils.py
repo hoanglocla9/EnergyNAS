@@ -68,7 +68,7 @@ def evaluate_model_darts(lag_range, target, n_gpus=0, max_epochs=50, fast_dev_ru
 
 
 @nni.trace
-def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_values, mode="filter", target_device="myriadvpu_openvino2019r2"):
+def evaluate_model(model_cls, lag_range, target, performance_metric, efficiency_metric, target_values, mode="filter", target_device="myriadvpu_openvino2019r2"):
     """
         target_device: the target device name. We support two platforms, namely myriadvpu_openvino2019r2, jetsonnano_jetpack46.
         mode: mode for NAS problem, we support filter and multi-objective mode. Filter mode is suitable for contraint single objective problem.
@@ -79,22 +79,15 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
     final_metrics = {"default": [], "MPAE": [], "MSE": []}
     hardware_metrics = []
 
-    if mode in ["debug", "moo_v2"]:
+    if mode in ["debug"]:
         estimator = None
     else:
-        if "energy" in optimized_metrics:
-            final_metrics["latency"] = []
-            final_metrics["energy"] = []
-            hardware_metrics = ["energy", "latency"]
-            estimator = nni.trace(HardwareMetricEstimator)(
-                target_device, hardware_metrics)
-        elif "latency" in optimized_metrics:
-            final_metrics["latency"] = []
-            hardware_metrics = ["latency"]
-            estimator = nni.trace(HardwareMetricEstimator)(
-                target_device, hardware_metrics)
-
-    if estimator != None:
+        final_metrics[efficiency_metric] = []
+        hardware_metrics = [efficiency_metric]
+        if efficiency_metric == "energy":  # add latency
+            hardware_metrics.append("latency")
+        estimator = nni.trace(HardwareMetricEstimator)(
+            target_device, hardware_metrics)
         hardware_estimated_result = estimator.estimate(model_cls())
 
     k_folds = 3
@@ -165,58 +158,32 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
             train_loss = train_loss / len(train_loader.sampler.indices)
             train_accuracy = train_accuracy / len(train_loader.sampler.indices)
 
-            if "MSE" in optimized_metrics:
-                intermediate_metrics = {
-                    "default": -1.0 * valid_loss, "MPAE": -1.0 * valid_accuracy, "MSE": -1.0 * valid_loss}
-            else:
-                intermediate_metrics = {"default": -1.0 * valid_accuracy,
-                                        "MPAE": -1.0 * valid_accuracy, "MSE": -1.0 * valid_loss}
+            intermediate_metrics = {"MPAE": -1.0 *
+                                    valid_accuracy, "MSE": -1.0 * valid_loss}
+            intermediate_metrics["default"] = intermediate_metrics[performance_metric]
             nni.report_intermediate_result(intermediate_metrics)
 
+        final_metrics["MPAE"].append(-1.0 *
+                                     sum(min_acc_list)/len(min_acc_list))
+        final_metrics["MSE"].append(-1.0 *
+                                    sum(min_loss_list)/len(min_loss_list))
+
         if estimator != None:
-            # hardware_estimated_result = estimator.estimate(model_cls())
             for hw_metric in hardware_metrics:
                 final_metrics[hw_metric].append(
                     hardware_estimated_result[hw_metric])
-
-            final_metrics["MPAE"].append(-1.0 *
-                                         sum(min_acc_list)/len(min_acc_list))
-            final_metrics["MSE"].append(-1.0 *
-                                        sum(min_loss_list)/len(min_loss_list))
             if mode == "moo_v1":
-                if "MSE" in optimized_metrics:
-                    final_metrics["default"].append(reward_function_v2(sum(min_loss_list)/len(
-                        min_loss_list), hardware_estimated_result['energy'], target_values["accuracy"]))
-                else:
-                    final_metrics["default"].append(reward_function_v2(sum(min_acc_list)/len(
-                        min_acc_list), hardware_estimated_result['energy'], target_values["accuracy"]))
-            elif mode == "filter":
-                if "MSE" in optimized_metrics:
-                    final_metrics["default"].append(-1.0 *
-                                                    sum(min_loss_list)/len(min_loss_list))
-                else:
-                    final_metrics["default"].append(-1.0 *
-                                                    sum(min_acc_list)/len(min_acc_list))
-            elif mode == "debug":
-                if "MSE" in optimized_metrics:
-                    final_metrics["default"].append(-1.0 *
-                                                    sum(min_loss_list)/len(min_loss_list))
-                else:
-                    final_metrics["default"].append(-1.0 *
-                                                    sum(min_acc_list)/len(min_acc_list))
+                final_metrics["default"].append(reward_function_v2(-1.0 * final_metrics[performance_metric][-1],
+                                                hardware_estimated_result[efficiency_metric], target_values[performance_metric]))
+            elif mode in ["filter", "moo_v2"]:
+                final_metrics["default"].append(
+                    final_metrics[performance_metric][-1])
             else:
                 raise Exception(f"Not Support this mode \"{mode}\" yet!")
         else:
-            final_metrics["MPAE"].append(-1.0 *
-                                         sum(min_acc_list)/len(min_acc_list))
-            final_metrics["MSE"].append(-1.0 *
-                                        sum(min_loss_list)/len(min_loss_list))
-            if optimized_metrics == "MSE":
-                final_metrics["default"].append(-1.0 *
-                                                sum(min_loss_list)/len(min_loss_list))
-            else:
-                final_metrics["default"].append(-1.0 *
-                                                sum(min_acc_list)/len(min_acc_list))
+            final_metrics["default"].append(
+                final_metrics[performance_metric][-1])
+
     metric = {}
     for key in final_metrics:
         if len(final_metrics[key]) == 0:
@@ -224,7 +191,8 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
         else:
             metric[key] = np.mean(final_metrics[key])
     if mode == "moo_v2":
-        metric['moo'] = {"obj_1": metric['MSE'], 'obj_2': metric['MPAE']}
+        metric['moo'] = {"obj_1": metric[performance_metric],
+                         'obj_2': metric[efficiency_metric]}
         # report final test result
     print("Final result: " + str(metric))
     nni.report_final_result(metric)
