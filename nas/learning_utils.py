@@ -86,6 +86,7 @@ def evaluate_model(model_cls, lag_range, target, performance_metric, efficiency_
         hardware_metrics = [efficiency_metric]
         if efficiency_metric == "energy":  # add latency
             hardware_metrics.append("latency")
+            final_metrics["latency"] = []
         estimator = nni.trace(HardwareMetricEstimator)(
             target_device, hardware_metrics)
         hardware_estimated_result = estimator.estimate(model_cls())
