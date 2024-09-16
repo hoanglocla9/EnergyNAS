@@ -1,24 +1,28 @@
-import nni, os
+import nni
+import os
 
-import numpy as np 
+import numpy as np
 
 from torch.utils.data import DataLoader, SubsetRandomSampler
 import torch
 from .data import MISO_Data_v1
 from sklearn.model_selection import KFold
-from .estimator import  HardwareMetricEstimator
+from .estimator import HardwareMetricEstimator
 from torchmetrics.regression import MeanAbsolutePercentageError
 
 from nni.nas.evaluator.pytorch import Lightning, Trainer, DataLoader
 from .darts import DartsRegressionModule
 
+
 @nni.trace
 def latency_reward_component(latency, target_latency):
-    alpha, beta = -0.07, -0.07 # as in the paper  https://openaccess.thecvf.com/content_CVPR_2019/papers/Tan_MnasNet_Platform-Aware_Neural_Architecture_Search_for_Mobile_CVPR_2019_paper.pdf
+    alpha, beta = -0.07, -0.07  # as in the paper  https://openaccess.thecvf.com/content_CVPR_2019/papers/Tan_MnasNet_Platform-Aware_Neural_Architecture_Search_for_Mobile_CVPR_2019_paper.pdf
     if latency < target_latency:
-        return (latency * 1.0 /target_latency * 1.0) ** alpha
+        return (latency * 1.0 / target_latency * 1.0) ** alpha
     else:
-        return (latency * 1.0 /target_latency * 1.0) ** beta
+        return (latency * 1.0 / target_latency * 1.0) ** beta
+
+
 @nni.trace
 def reward_function(accuracy, latency, target_latency):
     latency_component = latency_reward_component(latency, target_latency)
@@ -26,13 +30,16 @@ def reward_function(accuracy, latency, target_latency):
     # accuracy
     return -1.0 * accuracy * latency_component
 
+
 @nni.trace
 def accuracy_reward_component(accuracy, target_accuracy):
-    alpha, beta =  2, -1# -0.07, -0.07 # as in the paper  https://openaccess.thecvf.com/content_CVPR_2019/papers/Tan_MnasNet_Platform-Aware_Neural_Architecture_Search_for_Mobile_CVPR_2019_paper.pdf
+    alpha, beta = 2, -1  # -0.07, -0.07 # as in the paper  https://openaccess.thecvf.com/content_CVPR_2019/papers/Tan_MnasNet_Platform-Aware_Neural_Architecture_Search_for_Mobile_CVPR_2019_paper.pdf
     if accuracy < target_accuracy:
-        return (accuracy * 1.0 /target_accuracy * 1.0) ** alpha
+        return (accuracy * 1.0 / target_accuracy * 1.0) ** alpha
     else:
-        return (accuracy * 1.0 /target_accuracy * 1.0) ** beta
+        return (accuracy * 1.0 / target_accuracy * 1.0) ** beta
+
+
 @nni.trace
 def reward_function_v2(accuracy, energy, target_accuracy):
     accuracy_component = latency_reward_component(accuracy, target_accuracy)
@@ -40,71 +47,84 @@ def reward_function_v2(accuracy, energy, target_accuracy):
     # accuracy
     return -1.0 * energy * accuracy_component
 
+
 @nni.trace
 def evaluate_model_darts(lag_range, target, n_gpus=0, max_epochs=50, fast_dev_run=False):
     dataset = nni.trace(MISO_Data_v1)(lag_range, target)
     train_set, valid_set = torch.utils.data.random_split(dataset, [0.7, 0.3])
-    search_train_loader, search_valid_loader =  nni.trace(DataLoader)(train_set),  nni.trace(DataLoader)(valid_set)
+    search_train_loader, search_valid_loader = nni.trace(
+        DataLoader)(train_set),  nni.trace(DataLoader)(valid_set)
 
     evaluator = Lightning(
         DartsRegressionModule(0.025, 3e-4, 0., max_epochs),
         Trainer(
-                max_epochs=max_epochs,
-                fast_dev_run=fast_dev_run,
+            max_epochs=max_epochs,
+            fast_dev_run=fast_dev_run,
         ),
         train_dataloaders=search_train_loader,
         val_dataloaders=search_valid_loader
     )
     return evaluator
 
+
 @nni.trace
 def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_values, mode="filter", target_device="myriadvpu_openvino2019r2"):
     """
         target_device: the target device name. We support two platforms, namely myriadvpu_openvino2019r2, jetsonnano_jetpack46.
         mode: mode for NAS problem, we support filter and multi-objective mode. Filter mode is suitable for contraint single objective problem.
-        optimized_metrics: Optimized metrics, we support following metrics: MAE, MPAE, latency and energy. ("energy" option also includes "latency")
+        optimized_metrics: Optimized metrics, we support following metrics: MSE, MPAE, latency and energy. ("energy" option also includes "latency")
         target: name of the targeted feature.
         lag_range: number of time lags.
     """
-    final_metrics = {"default": [], "MPAE": [], "MAE": []}
+    final_metrics = {"default": [], "MPAE": [], "MSE": []}
     hardware_metrics = []
-    if "energy" in optimized_metrics:
-        final_metrics[ "latency"] = []
-        final_metrics["energy"] = []
-        hardware_metrics = ["energy", "latency"]
-        estimator = nni.trace(HardwareMetricEstimator)(target_device, hardware_metrics)
-    elif "latency" in optimized_metrics:
-        final_metrics[ "latency"] = []
-        hardware_metrics = ["latency"]
-        estimator = nni.trace(HardwareMetricEstimator)(target_device, hardware_metrics)
-    else:
+
+    if mode in ["debug", "moo_v2"]:
         estimator = None
-    
+    else:
+        if "energy" in optimized_metrics:
+            final_metrics["latency"] = []
+            final_metrics["energy"] = []
+            hardware_metrics = ["energy", "latency"]
+            estimator = nni.trace(HardwareMetricEstimator)(
+                target_device, hardware_metrics)
+        elif "latency" in optimized_metrics:
+            final_metrics["latency"] = []
+            hardware_metrics = ["latency"]
+            estimator = nni.trace(HardwareMetricEstimator)(
+                target_device, hardware_metrics)
+
     if estimator != None:
         hardware_estimated_result = estimator.estimate(model_cls())
 
     k_folds = 3
     kfold = nni.trace(KFold)(n_splits=k_folds, shuffle=True)
     dataset = nni.trace(MISO_Data_v1)(lag_range, target)
-    criterion = torch.nn.L1Loss()
-    acc_fn = MeanAbsolutePercentageError()## torch.nn.MSELoss()
+    criterion = torch.nn.MSELoss()
+    acc_fn = MeanAbsolutePercentageError()  # torch.nn.MSELoss()
 
     average_loss = 0.0
     average_min = 0.0
 
     for fold, (train_ids, valid_ids) in enumerate(kfold.split(dataset)):
-        train_subsampler = nni.trace(SubsetRandomSampler)(train_ids, torch.Generator().manual_seed(42))
-        valid_subsampler = nni.trace(SubsetRandomSampler)(valid_ids, torch.Generator().manual_seed(42))
+        train_subsampler = nni.trace(SubsetRandomSampler)(
+            train_ids, torch.Generator().manual_seed(42))
+        valid_subsampler = nni.trace(SubsetRandomSampler)(
+            valid_ids, torch.Generator().manual_seed(42))
 
-        train_loader = nni.trace(DataLoader)(dataset, batch_size=512, sampler=train_subsampler)
-        valid_loader = nni.trace(DataLoader)(dataset, batch_size=512, sampler=valid_subsampler)
+        train_loader = nni.trace(DataLoader)(
+            dataset, batch_size=512, sampler=train_subsampler)
+        valid_loader = nni.trace(DataLoader)(
+            dataset, batch_size=512, sampler=valid_subsampler)
         model = model_cls()
         dummy_input = torch.zeros(1, 1, 33)
-        torch.onnx.export(model, (dummy_input, ), os.path.join(os.environ['NNI_OUTPUT_DIR'], 'model.onnx'))
+        torch.onnx.export(model, (dummy_input, ), os.path.join(
+            os.environ['NNI_OUTPUT_DIR'], 'model.onnx'))
 
-        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-        model.to(device) 
-        
+        device = torch.device(
+            'cuda') if torch.cuda.is_available() else torch.device('cpu')
+        model.to(device)
+
         # model.apply(reset_weights)
         optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
         min_loss_list = []
@@ -119,11 +139,12 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
                     output = model(tensor_x)
                     loss = criterion(output, tensor_y)
                     valid_loss += loss.item() * len(tensor_x)
-                    valid_accuracy += acc_fn(output.squeeze().cpu(), tensor_y.squeeze().cpu()).item() * len(tensor_x)
-
+                    valid_accuracy += acc_fn(output.squeeze().cpu(),
+                                             tensor_y.squeeze().cpu()).item() * len(tensor_x)
 
                 valid_loss = valid_loss / len(valid_loader.sampler.indices)
-                valid_accuracy = valid_accuracy / len(valid_loader.sampler.indices)
+                valid_accuracy = valid_accuracy / \
+                    len(valid_loader.sampler.indices)
                 min_loss_list.append(valid_loss)
                 min_acc_list.append(valid_accuracy)
 
@@ -138,55 +159,72 @@ def evaluate_model(model_cls, lag_range, target, optimized_metrics, target_value
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item() * len(tensor_x)
-                train_accuracy += acc_fn(output.squeeze().cpu(), tensor_y.squeeze().cpu()).item() * len(tensor_x)
+                train_accuracy += acc_fn(output.squeeze().cpu(),
+                                         tensor_y.squeeze().cpu()).item() * len(tensor_x)
 
             train_loss = train_loss / len(train_loader.sampler.indices)
             train_accuracy = train_accuracy / len(train_loader.sampler.indices)
-            
-            if "MAE" in optimized_metrics:
-                intermediate_metrics = {"default": -1.0 * valid_loss, "MPAE": -1.0 * valid_accuracy, "MAE": -1.0 * valid_loss}
+
+            if "MSE" in optimized_metrics:
+                intermediate_metrics = {
+                    "default": -1.0 * valid_loss, "MPAE": -1.0 * valid_accuracy, "MSE": -1.0 * valid_loss}
             else:
-                intermediate_metrics = {"default": -1.0 * valid_accuracy, "MPAE": -1.0 * valid_accuracy, "MAE": -1.0 * valid_loss}
+                intermediate_metrics = {"default": -1.0 * valid_accuracy,
+                                        "MPAE": -1.0 * valid_accuracy, "MSE": -1.0 * valid_loss}
             nni.report_intermediate_result(intermediate_metrics)
-        
+
         if estimator != None:
             # hardware_estimated_result = estimator.estimate(model_cls())
             for hw_metric in hardware_metrics:
-                final_metrics[hw_metric].append(hardware_estimated_result[hw_metric])
+                final_metrics[hw_metric].append(
+                    hardware_estimated_result[hw_metric])
 
-            final_metrics["MPAE"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
-            final_metrics["MAE"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
-            if mode == "mmo":
-                if "MAE" in optimized_metrics:
-                    final_metrics["default"].append(reward_function_v2(sum(min_loss_list)/len(min_loss_list), hardware_estimated_result['energy'], target_values["accuracy"]))
+            final_metrics["MPAE"].append(-1.0 *
+                                         sum(min_acc_list)/len(min_acc_list))
+            final_metrics["MSE"].append(-1.0 *
+                                        sum(min_loss_list)/len(min_loss_list))
+            if mode == "moo_v1":
+                if "MSE" in optimized_metrics:
+                    final_metrics["default"].append(reward_function_v2(sum(min_loss_list)/len(
+                        min_loss_list), hardware_estimated_result['energy'], target_values["accuracy"]))
                 else:
-                    final_metrics["default"].append(reward_function_v2(sum(min_acc_list)/len(min_acc_list), hardware_estimated_result['energy'], target_values["accuracy"]))
+                    final_metrics["default"].append(reward_function_v2(sum(min_acc_list)/len(
+                        min_acc_list), hardware_estimated_result['energy'], target_values["accuracy"]))
             elif mode == "filter":
-                if "MAE" in optimized_metrics:
-                    final_metrics["default"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
+                if "MSE" in optimized_metrics:
+                    final_metrics["default"].append(-1.0 *
+                                                    sum(min_loss_list)/len(min_loss_list))
                 else:
-                    final_metrics["default"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
+                    final_metrics["default"].append(-1.0 *
+                                                    sum(min_acc_list)/len(min_acc_list))
             elif mode == "debug":
-                if "MAE" in optimized_metrics:
-                    final_metrics["default"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
+                if "MSE" in optimized_metrics:
+                    final_metrics["default"].append(-1.0 *
+                                                    sum(min_loss_list)/len(min_loss_list))
                 else:
-                    final_metrics["default"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
+                    final_metrics["default"].append(-1.0 *
+                                                    sum(min_acc_list)/len(min_acc_list))
             else:
-                raise Exception (f"Not Support this mode \"{mode}\" yet!")
+                raise Exception(f"Not Support this mode \"{mode}\" yet!")
         else:
-            final_metrics["MPAE"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
-            final_metrics["MAE"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
-            if optimized_metrics == "MAE":
-                final_metrics["default"].append(-1.0 * sum(min_loss_list)/len(min_loss_list))
+            final_metrics["MPAE"].append(-1.0 *
+                                         sum(min_acc_list)/len(min_acc_list))
+            final_metrics["MSE"].append(-1.0 *
+                                        sum(min_loss_list)/len(min_loss_list))
+            if optimized_metrics == "MSE":
+                final_metrics["default"].append(-1.0 *
+                                                sum(min_loss_list)/len(min_loss_list))
             else:
-                final_metrics["default"].append(-1.0 * sum(min_acc_list)/len(min_acc_list))
+                final_metrics["default"].append(-1.0 *
+                                                sum(min_acc_list)/len(min_acc_list))
     metric = {}
     for key in final_metrics:
         if len(final_metrics[key]) == 0:
             metric[key] = 0
         else:
             metric[key] = np.mean(final_metrics[key])
-
-    # report final test result
+    if mode == "moo_v2":
+        metric['moo'] = {"obj_1": metric['MSE'], 'obj_2': metric['MPAE']}
+        # report final test result
     print("Final result: " + str(metric))
     nni.report_final_result(metric)

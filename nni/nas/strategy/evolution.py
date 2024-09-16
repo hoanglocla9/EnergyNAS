@@ -270,6 +270,11 @@ class MultiObjectiveRegularizedEvolution(BaseStrategy):
         self._polling_interval = 2.
         self.filter = model_filter
 
+    def export_top_models(self, top_k: int):
+        samples = self._population
+        X = np.array([[sample.y_1, sample.y_2] for sample in samples])
+        sorted_list = nondominated_sort(X, flatten=True)
+
     def random(self, search_space):
         return {k: random.choice(v) for k, v in search_space.items()}
 
@@ -286,7 +291,7 @@ class MultiObjectiveRegularizedEvolution(BaseStrategy):
 
     def best_parent(self):
         samples = [p for p in self._population]  # copy population
-        random.shuffle(samples)
+        # random.shuffle(samples)
         samples = list(samples)[:self.sample_size]
 
         X = np.array([[sample.y_1, sample.y_2] for sample in samples])

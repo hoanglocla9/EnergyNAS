@@ -15,25 +15,30 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Just an example", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-s", "--strategy", type=str,
-                        help="search stragegy, currently, only supported for random and evolution strategies", default="random")
+                        help="NAS search stragegy, currently, only supported for random, evolution, and reinforce strategies", default="random")
     parser.add_argument("-r", "--lag_range", type=int,
-                        help="number of lag features", default=26)
+                        help="Number of lag features. MISO dataset is a time-series dataset. Therefore, we also use\
+                            some lag features from previos time lags to forecast for a future label. E.g. 26 meaning \
+                            that we use features of the last 26 timesteps", default=26)
     parser.add_argument("-n", "--trial_number", type=int,
-                        help="number of trial steps", default=20)
+                        help="Maximum number of trial samples", default=20)
     parser.add_argument("-c", "--n_gpus", type=int,
-                        help="number of gpus", default=0)
+                        help="Number of gpus, you want to run NAS", default=0)
     parser.add_argument("-p", "--port", type=int,
-                        help="NNI WebUI Port", default=8081)
+                        help="NNI WebUI Port. You can go to https://web-IP:port to access NNI WebUI", default=8081)
     parser.add_argument("-t", "--target", type=str,
-                        help="Training Label Name", default="ref_ch4(ppm)")
+                        help="Training Label Name. This option depends on the dataset. We currently support MISO dataset only. \
+                        There are two targets for MISO dataset, namely ref_ch4(ppm) and ref_h2o(ppm)", default="ref_ch4(ppm)")
     parser.add_argument("-me", "--metrics", type=list,
-                        help="The Optimized Metric", default=["MPAE", "energy"])
+                        help="The Optimized Metric. We support 4 metrics: MPAE, energy, latency and MSE", default=["MPAE", "energy"])
     parser.add_argument("-m", "--mode", type=str,
-                        help="Constraint or MOO mode", default="debug")
+                        help="Constraint or MOO mode. We support three modes, namely debug, mmo and filter. \
+                        Debug means that we run NAS with accuracy only. MMO mean that NAS with energy and \
+                        accuracy. Filter meaning that we apply a filter for the energy", default="debug")
     parser.add_argument("-th", "--target_hardware", type=str,
-                        help="Target hardware", default="myriadvpu_openvino2019r2")
+                        help="Target hardware. We support 2 platforms: myriadvpu_openvino2019r2 and jetsonnano_jetpack46", default="myriadvpu_openvino2019r2")
     parser.add_argument("-bm", "--backbone_model", type=str,
-                        help="The base model of NAS", default="mlp")
+                        help="The base model of NAS. We support 3 backbone models: mlp, resnet, and fttransformer", default="mlp")
 
     thresholds = {"latency": 5, "accuracy": 0.3}
 
@@ -82,7 +87,18 @@ if __name__ == "__main__":
     elif cfg["strategy"] == "darts":
         search_strategy = strategy.DARTS()
         evaluator = evaluate_model_darts(
-            lag_range=cfg['lag_range'], target=cfg['target'], n_gpus=cfg['n_gpus'], max_epochs=50, fast_dev_run=False)
+            lag_range=cfg['lag_range'], target=cfg['target'], n_gpus=cfg['n_gpus'],
+            max_epochs=50, fast_dev_run=False)
+
+    elif cfg["strategy"] == "moo_evolution":
+        search_strategy = strategy.MultiObjectiveRegularizedEvolution(
+            sample_size=cfg["trial_number"]//8,
+            population_size=cfg["trial_number"]//2,
+            cycles=cfg["trial_number"],
+            model_filter=model_filter
+        )
+    assert (cfg['mode'] == 'moo_v2' and cfg["strategy"] == "moo_evolution") or \
+        (cfg["mode"] != "moo_v2" and cfg["strategy"] != "moo_evolution")
 
     exp = RetiariiExperiment(model_space, evaluator, [], search_strategy)
     exp_config = RetiariiExeConfig('local')
@@ -107,8 +123,8 @@ if __name__ == "__main__":
         trimmed_target = "ch4"
     else:
         trimmed_target = "h2o"
-    folder_path = 'results/{}_{}_{}_{}'.format(
-        cfg["strategy"], trimmed_target, "-".join(cfg['metrics']), cfg["trial_number"])
+    folder_path = 'results/{}_{}_{}_{}_{}'.format(
+        cfg["strategy"], trimmed_target, "-".join(cfg['metrics']), cfg["trial_number"], cfg['backbone_model'])
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
 

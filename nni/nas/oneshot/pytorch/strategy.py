@@ -56,7 +56,8 @@ class OneShotStrategy(BaseStrategy):
                 raise TypeError('Model is not a nn.Module. ' + _reason)
             py_model: nn.Module = base_model.python_object
             if not isinstance(base_model.evaluator, Lightning):
-                raise TypeError('Evaluator needs to be a lightning evaluator to make one-shot strategy work.')
+                raise TypeError(
+                    'Evaluator needs to be a lightning evaluator to make one-shot strategy work.')
             evaluator_module: LightningModule = base_model.evaluator.module
             evaluator_module.running_mode = 'oneshot'
             evaluator_module.set_model(py_model)
@@ -66,7 +67,8 @@ class OneShotStrategy(BaseStrategy):
             evaluator_module = ClassificationModule()
             evaluator_module.running_mode = 'oneshot'
             evaluator_module.set_model(base_model)
-        self.model = self.oneshot_module(evaluator_module, **self.oneshot_kwargs)
+        self.model = self.oneshot_module(
+            evaluator_module, **self.oneshot_kwargs)
 
     def run(self, base_model: Model, applied_mutators):
         # one-shot strategy doesn't use ``applied_mutators``
@@ -78,27 +80,33 @@ class OneShotStrategy(BaseStrategy):
             raise ValueError('Mutator is not empty. ' + _reason)
 
         if not isinstance(base_model.evaluator, Lightning):
-            raise TypeError('Evaluator needs to be a lightning evaluator to make one-shot strategy work.')
+            raise TypeError(
+                'Evaluator needs to be a lightning evaluator to make one-shot strategy work.')
 
         self.attach_model(base_model)
         evaluator: Lightning = base_model.evaluator
         if evaluator.train_dataloaders is None or evaluator.val_dataloaders is None:
-            raise TypeError('Training and validation dataloader are both required to set in evaluator for one-shot strategy.')
-        train_loader, val_loader = self.preprocess_dataloader(evaluator.train_dataloaders, evaluator.val_dataloaders)
+            raise TypeError(
+                'Training and validation dataloader are both required to set in evaluator for one-shot strategy.')
+        train_loader, val_loader = self.preprocess_dataloader(
+            evaluator.train_dataloaders, evaluator.val_dataloaders)
         assert isinstance(self.model, BaseOneShotLightningModule)
         evaluator.trainer.fit(self.model, train_loader, val_loader)
 
     def export_top_models(self, top_k: int = 1) -> list[Any]:
         """The behavior of export top models in strategy depends on the implementation of inner one-shot module."""
         if self.model is None:
-            raise RuntimeError('One-shot strategy needs to be run before export.')
+            raise RuntimeError(
+                'One-shot strategy needs to be run before export.')
         if top_k != 1:
-            warnings.warn('One-shot strategy currently only supports exporting top-1 model.', RuntimeWarning)
+            warnings.warn(
+                'One-shot strategy currently only supports exporting top-1 model.', RuntimeWarning)
         return [self.model.export()]
 
 
 class DARTS(OneShotStrategy):
-    __doc__ = DartsLightningModule._darts_note.format(module_notes='', module_params='')
+    __doc__ = DartsLightningModule._darts_note.format(
+        module_notes='', module_params='')
 
     def __init__(self, **kwargs):
         super().__init__(DartsLightningModule, **kwargs)
@@ -112,7 +120,8 @@ class DARTS(OneShotStrategy):
 
 
 class Proxyless(OneShotStrategy):
-    __doc__ = ProxylessLightningModule._proxyless_note.format(module_notes='', module_params='')
+    __doc__ = ProxylessLightningModule._proxyless_note.format(
+        module_notes='', module_params='')
 
     def __init__(self, **kwargs):
         super().__init__(ProxylessLightningModule, **kwargs)
@@ -125,7 +134,8 @@ class Proxyless(OneShotStrategy):
 
 
 class GumbelDARTS(OneShotStrategy):
-    __doc__ = GumbelDartsLightningModule._gumbel_darts_note.format(module_notes='', module_params='')
+    __doc__ = GumbelDartsLightningModule._gumbel_darts_note.format(
+        module_notes='', module_params='')
 
     def __init__(self, **kwargs):
         super().__init__(GumbelDartsLightningModule, **kwargs)
@@ -138,7 +148,8 @@ class GumbelDARTS(OneShotStrategy):
 
 
 class ENAS(OneShotStrategy):
-    __doc__ = EnasLightningModule._enas_note.format(module_notes='', module_params='')
+    __doc__ = EnasLightningModule._enas_note.format(
+        module_notes='', module_params='')
 
     def __init__(self, **kwargs):
         super().__init__(EnasLightningModule, **kwargs)
@@ -153,7 +164,8 @@ class ENAS(OneShotStrategy):
 
 
 class RandomOneShot(OneShotStrategy):
-    __doc__ = RandomSamplingLightningModule._random_note.format(module_notes='', module_params='')
+    __doc__ = RandomSamplingLightningModule._random_note.format(
+        module_notes='', module_params='')
 
     def __init__(self, **kwargs):
         super().__init__(RandomSamplingLightningModule, **kwargs)

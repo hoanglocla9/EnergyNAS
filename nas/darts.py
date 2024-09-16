@@ -1,6 +1,7 @@
 import torch
 from nni.nas.evaluator.pytorch import RegressionModule
 
+
 class DartsRegressionModule(RegressionModule):
     def __init__(
         self,
@@ -12,7 +13,8 @@ class DartsRegressionModule(RegressionModule):
         self.auxiliary_loss_weight = auxiliary_loss_weight
         # Training length will be used in LR scheduler
         self.max_epochs = max_epochs
-        super().__init__(learning_rate=learning_rate, weight_decay=weight_decay, export_onnx=False)
+        super().__init__(learning_rate=learning_rate,
+                         weight_decay=weight_decay, export_onnx=False)
 
     def configure_optimizers(self):
         """Customized optimizer with momentum, as well as a scheduler."""
@@ -47,7 +49,8 @@ class DartsRegressionModule(RegressionModule):
 
     def on_train_epoch_start(self):
         # Set drop path probability before every epoch. This has no effect if drop path is not enabled in model.
-        self.model.set_drop_path_prob(self.model.drop_path_prob * self.current_epoch / self.max_epochs)
+        self.model.set_drop_path_prob(
+            self.model.drop_path_prob * self.current_epoch / self.max_epochs)
 
         # Logging learning rate at the beginning of every epoch
         self.log('lr', self.trainer.optimizers[0].param_groups[0]['lr'])

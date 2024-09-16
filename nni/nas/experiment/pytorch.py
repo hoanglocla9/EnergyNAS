@@ -314,6 +314,8 @@ class RetiariiExperiment(Experiment):
                     )
                     self._save_experiment_checkpoint(base_model_ir, self.applied_mutators, self.strategy,
                                                      canoni_conf.experiment_working_directory)
+                    # print("TESTT MUTATORS, pytorch.py---",
+                    #       self.applied_mutators)
                     # for mutator in self.applied_mutators:
                     #     if hasattr(mutator, "nodes"):
                     #         print(mutator, mutator.label, mutator.nodes)
