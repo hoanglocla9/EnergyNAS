@@ -50,13 +50,18 @@ def get_predict_features(config):
             s = item["strides"][1] if "strides" in item else 1
             if "inputh" not in item:
                 if "input_tensors" in item:
-                    inputh =  item["input_tensors"][0][1] ## should be equal 1 
+                    inputh = item["input_tensors"][0][1]  # should be equal 1
                 else:
                     raise Exception(f"Something Wrong with this node: {item}")
             else:
                 inputh = item["inputh"]
         if op in ["channelshuffle", "split"]:
-            [b, inputh, inputw, cin] = item["input_tensors"][0]
+            if len(item["input_tensors"][0]) == 4:
+                [b, inputh, inputw, cin] = item["input_tensors"][0]
+            elif len(item["input_tensors"][0]) == 3:
+                [b, inputh, cin] = item["input_tensors"][0]
+            elif len(item["input_tensors"][0]) == 2:
+                [inputh, cin] = item["input_tensors"][0]
 
         if "conv" in op:
             flops, params = get_flops_params(op, inputh, cin, cout, ks, s)
@@ -125,7 +130,7 @@ def get_predict_features(config):
                 cin1 = 0
                 cin2 = 0
             features = [inputh, cin1, cin2]
-        else: # indicates that there is no matching predictor for this op
+        else:  # indicates that there is no matching predictor for this op
             # logging.warning(f'There is no matching predictor for op {op}.')
             continue
         mdicts[layer] = {}
