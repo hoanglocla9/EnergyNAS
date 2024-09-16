@@ -29,8 +29,10 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--target", type=str,
                         help="Training Label Name. This option depends on the dataset. We currently support MISO dataset only. \
                         There are two targets for MISO dataset, namely ref_ch4(ppm) and ref_h2o(ppm)", default="ref_ch4(ppm)")
-    parser.add_argument("-me", "--metrics", type=list,
-                        help="The Optimized Metric. We support 4 metrics: MPAE, energy, latency and MSE", default=["MPAE", "energy"])
+    parser.add_argument("-pm", "--performance_metric", type=str,
+                        help="The Performance Metric. We support 2 metrics: MPAE, and MSE", default="MSE")
+    parser.add_argument("-em", "--efficiency_metric", type=str,
+                        help="The Efficiency Metric. We support 2 metrics: energy, and latency", default="energy")
     parser.add_argument("-m", "--mode", type=str,
                         help="Constraint or MOO mode. We support three modes, namely debug, mmo and filter. \
                         Debug means that we run NAS with accuracy only. MMO mean that NAS with energy and \
@@ -40,12 +42,11 @@ if __name__ == "__main__":
     parser.add_argument("-bm", "--backbone_model", type=str,
                         help="The base model of NAS. We support 3 backbone models: mlp, resnet, and fttransformer", default="mlp")
 
-    thresholds = {"latency": 5, "accuracy": 0.3}
-
     args = parser.parse_args()
     cfg = vars(args)
-    if "energy" in cfg['metrics'] and "latency" in cfg['metrics']:
-        cfg['metrics'].remove("latency")
+
+    thresholds = {cfg['efficiency_metric']: 5, cfg['performance_metric']: 0.3}
+
     if cfg['backbone_model'] == 'mlp':
         model_space = MLPSpace(n_features=cfg['lag_range']+7)
     elif cfg['backbone_model'] == 'resnet':
@@ -57,7 +58,8 @@ if __name__ == "__main__":
 
     evaluator = FunctionalEvaluator(evaluate_model, lag_range=cfg['lag_range'],
                                     target=cfg['target'],
-                                    optimized_metrics=cfg['metrics'],
+                                    performance_metric=cfg['performance_metric'],
+                                    efficiency_metric=cfg['efficiency_metric'],
                                     mode=cfg['mode'],
                                     target_values=thresholds)
 
@@ -123,8 +125,8 @@ if __name__ == "__main__":
         trimmed_target = "ch4"
     else:
         trimmed_target = "h2o"
-    folder_path = 'results/{}_{}_{}_{}_{}'.format(
-        cfg["strategy"], trimmed_target, "-".join(cfg['metrics']), cfg["trial_number"], cfg['backbone_model'])
+    folder_path = 'results/{}_{}_{}-{}_{}_{}'.format(
+        cfg["strategy"], trimmed_target, cfg['performance_metric'], cfg['efficiency_metric'], cfg["trial_number"], cfg['backbone_model'])
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
 
