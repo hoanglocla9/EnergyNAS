@@ -132,6 +132,7 @@ if __name__ == "__main__":
     exp.run(exp_config, port=cfg["port"])
     print("Done NAS!!!")
     print("Start to write")
+
     for idx, model_code in enumerate(exp.export_top_models(top_k=10, formatter="code")):
         file_path = os.path.join(folder_path, "top_{}.py".format(idx + 1))
         with open(file_path, 'w') as f:

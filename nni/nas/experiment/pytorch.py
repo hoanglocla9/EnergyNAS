@@ -382,7 +382,7 @@ class RetiariiExperiment(Experiment):
             return self.evaluator.export()
         try:
             # this currently works for one-shot algorithms
-            return self.strategy.export_top_models(top_k=top_k)
+            return self.strategy.export_top_models(top_k=top_k, optimize_mode=optimize_mode, formatter=formatter)
         except NotImplementedError:
             # when strategy hasn't implemented its own export logic
             all_models = filter(lambda m: m.metric is not None, list_models())

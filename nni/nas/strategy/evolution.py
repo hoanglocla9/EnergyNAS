@@ -11,10 +11,11 @@ import time
 from typing import Deque
 
 from nni.nas.execution import query_available_resources, submit_models
-from nni.nas.execution.common import Model, ModelStatus
+from nni.nas.execution.common import Model, ModelStatus, get_mutation_dict
 from .base import BaseStrategy
 from .utils import dry_run_for_search_space, get_targeted_model, filter_model
 from .nondominated import nondominated_sort
+from nni.nas.execution.pytorch.codegen import model_to_pytorch_script
 import numpy as np
 
 _logger = logging.getLogger(__name__)
@@ -34,8 +35,8 @@ class Individual:
 class MOOIndividual:
     """
     A class that represents a multi-objective individual.
-    Holds two attributes, where 
-        ``x`` is the model and 
+    Holds two attributes, where
+        ``x`` is the model and
         ``y_1`` is the first metric (e.g., accuracy) and
         ``y_2`` is the second metric (e.g., energy)
 
@@ -265,15 +266,27 @@ class MultiObjectiveRegularizedEvolution(BaseStrategy):
         self._success_count = 0
         # for dedup. has to be a list because keys are non-hashable.
         self._history_configs: list[str] = []
-        self._population: Deque[Individual] = collections.deque()
+        self._population_individuals: Deque[Individual] = collections.deque()
+        self._population_models: Deque[Model] = collections.deque()
         self._running_models: list[tuple[dict, Model]] = []
         self._polling_interval = 2.
         self.filter = model_filter
 
-    def export_top_models(self, top_k: int):
-        samples = self._population
+    def export_top_models(self, top_k: int, optimize_mode: str = "maximize", formatter: str = "code"):
+        samples = self._population_individuals
         X = np.array([[sample.y_1, sample.y_2] for sample in samples])
-        sorted_list = nondominated_sort(X, flatten=True)
+        sorted_idx_list = nondominated_sort(X, flatten=True)
+        sorted_model_list = [self._population_models[idx]
+                             for idx in sorted_idx_list]
+        if optimize_mode == "minimize":
+            sorted_model_list.reverse()
+        elif optimize_mode != "maximize":
+            raise Exception("Do not support this optimize_mode!!!")
+        return_model_list = sorted_model_list[:top_k]
+        if formatter == 'code':
+            return [model_to_pytorch_script(model) for model in return_model_list]
+        elif formatter == 'dict':
+            return [get_mutation_dict(model) for model in return_model_list]
 
     def random(self, search_space):
         return {k: random.choice(v) for k, v in search_space.items()}
@@ -290,7 +303,7 @@ class MultiObjectiveRegularizedEvolution(BaseStrategy):
         return child
 
     def best_parent(self):
-        samples = [p for p in self._population]  # copy population
+        samples = [p for p in self._population_individuals]  # copy population
         # random.shuffle(samples)
         samples = list(samples)[:self.sample_size]
 
@@ -316,9 +329,9 @@ class MultiObjectiveRegularizedEvolution(BaseStrategy):
         search_space = dry_run_for_search_space(base_model, applied_mutators)
         # Run the first population regardless concurrency
         _logger.info('Initializing the first population.')
-        while len(self._population) + len(self._running_models) <= self.population_size:
+        while len(self._population_individuals) + len(self._running_models) <= self.population_size:
             # try to submit new models
-            while len(self._population) + len(self._running_models) < self.population_size:
+            while len(self._population_individuals) + len(self._running_models) < self.population_size:
                 config = self.repeat_until_new_config(
                     lambda: self.random(search_space))
                 self._submit_config(config, base_model, applied_mutators)
@@ -327,7 +340,7 @@ class MultiObjectiveRegularizedEvolution(BaseStrategy):
             self._remove_failed_models_from_running_list()
             time.sleep(self._polling_interval)
 
-            if len(self._population) >= self.population_size:
+            if len(self._population_individuals) >= self.population_size:
                 break
 
         # Resource-aware mutation of models
@@ -372,9 +385,12 @@ class MultiObjectiveRegularizedEvolution(BaseStrategy):
                     config, metric['obj_1'], metric['obj_2'])
                 _logger.debug(
                     'Multive-Objective Individual created: %s', str(individual))
-                self._population.append(individual)
-                if len(self._population) > self.population_size:
-                    self._population.popleft()
+                self._population_individuals.append(individual)
+                self._population_models.append(model)
+                if len(self._population_individuals) > self.population_size:
+                    self._population_individuals.popleft()
+                    self._population_models.popleft()
+
                 completed_indices.append(i)
         for i in completed_indices[::-1]:
             # delete from end to start so that the index number will not be affected.
