@@ -18,7 +18,6 @@ class RuleReader:
         if rule_file:
             with open(rule_file, "r") as fp:
                 self.rules = json.load(fp)
-            print(rule_file)
         self._extract_fusible()
         self._parse_multiop_block()
 
@@ -53,7 +52,8 @@ class RuleReader:
                             "inbounds": [get_name(i - 1)] if i > 0 else [],
                             "outbounds": [get_name(i + 1)] if i < len(ops) - 1 else [],
                         }
-                    self.fusion_units["-".join(ops)] = [ModelGraph(graph=fusion_unit)]
+                    self.fusion_units["-".join(ops)
+                                      ] = [ModelGraph(graph=fusion_unit)]
 
     def _parse_multiop_block(self):
         for block in self.multiop_blocks:
