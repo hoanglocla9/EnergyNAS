@@ -1,9 +1,9 @@
 import nni.retiarii.strategy as strategy
 from nni.retiarii.evaluator import FunctionalEvaluator
 from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-from nas.learning_utils import evaluate_model, evaluate_model_darts
+from nas.learning_utils import evaluate_model, evaluate_model_darts, evaluate_model_v2
 from nas.estimator import HardwareMetricFilter
-from nas.model import MLPSpace, ResNetSpace, FTTransformerSpace
+from nas.model import MLPSpace, ResNetSpace, FTTransformerSpace, ConventionalTransformerSpace
 
 import logging
 import argparse
@@ -20,6 +20,8 @@ if __name__ == "__main__":
                         help="Number of lag features. MISO dataset is a time-series dataset. Therefore, we also use\
                             some lag features from previos time lags to forecast for a future label. E.g. 26 meaning \
                             that we use features of the last 26 timesteps", default=26)
+    parser.add_argument("-nf", "--n_features", type=int,
+                        help="Number of features in dataset", default=0)
     parser.add_argument("-n", "--trial_number", type=int,
                         help="Maximum number of trial samples", default=20)
     parser.add_argument("-c", "--n_gpus", type=int,
@@ -41,27 +43,42 @@ if __name__ == "__main__":
                         help="Target hardware. We support 2 platforms: myriadvpu_openvino2019r2 and jetsonnano_jetpack46", default="myriadvpu_openvino2019r2")
     parser.add_argument("-bm", "--backbone_model", type=str,
                         help="The base model of NAS. We support 3 backbone models: mlp, resnet, and fttransformer", default="mlp")
+    parser.add_argument("-bs", "--batch_size", type=str,
+                        help="Batch Size", default=32)
 
     args = parser.parse_args()
     cfg = vars(args)
 
+    e_metric_folder_name = "power" if cfg['efficiency_metric'] == "energy" else cfg['efficiency_metric']
+    assert os.path.exists(
+        f"./predictors/{cfg['target_hardware']}/{e_metric_folder_name}/")
+
+    if cfg['lag_range'] > 0 and cfg['n_features'] == 0:
+        n_features = cfg['lag_range']+7
+    else:
+        n_features = cfg['n_features']
+
     thresholds = {cfg['efficiency_metric']: 5, cfg['performance_metric']: 0.3}
 
     if cfg['backbone_model'] == 'mlp':
-        model_space = MLPSpace(n_features=cfg['lag_range']+7)
+        model_space = MLPSpace(n_features=n_features)
     elif cfg['backbone_model'] == 'resnet':
-        model_space = ResNetSpace(n_features=cfg['lag_range']+7)
+        model_space = ResNetSpace(n_features=n_features)
     elif cfg['backbone_model'] == 'fttransformer':
-        model_space = FTTransformerSpace(n_features=cfg['lag_range']+7)
+        # , batch_size=cfg['batch_size']
+        model_space = FTTransformerSpace(n_features=n_features)
+    elif cfg['backbone_model'] == 'transformer':
+        model_space = ConventionalTransformerSpace(
+            n_features=n_features)
     else:
         raise Exception('Not support this backbone model yet!')
 
-    evaluator = FunctionalEvaluator(evaluate_model, lag_range=cfg['lag_range'],
+    evaluator = FunctionalEvaluator(evaluate_model_v2, lag_range=cfg['lag_range'],
                                     target=cfg['target'],
                                     performance_metric=cfg['performance_metric'],
                                     efficiency_metric=cfg['efficiency_metric'],
                                     mode=cfg['mode'],
-                                    target_values=thresholds)
+                                    target_values=thresholds, batch_size=cfg['batch_size'])
 
     if cfg['mode'] == "filter":
         model_filter = HardwareMetricFilter(

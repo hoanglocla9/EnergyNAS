@@ -11,7 +11,7 @@ import typing as ty
 import copy
 import warnings
 from typing import Optional, Any, Union, Callable
-from .transformer import FTTransformer
+from .transformer_modules import FTTransformer
 
 
 def get_activation_name_options():
@@ -735,7 +735,7 @@ class TransformerEncoder(nn.Module):
 
 
 @nni.retiarii.model_wrapper
-class FTTransformerSpace(nn.Module):
+class ConventionalTransformerSpace(nn.Module):
     def __init__(self, n_features,  d_out=1):
         super().__init__()
         d_token = nn.ValueChoice([64, 128, 192, 256], label="d_token")
@@ -766,6 +766,38 @@ class FTTransformerSpace(nn.Module):
         x = self.last_activation(x)
         x = self.head(x)
         x = x.squeeze(-1)
+        return x
+
+
+@nni.retiarii.model_wrapper
+class FTTransformerSpace(nn.Module):
+    def __init__(self, n_features,  d_out=1):
+        super().__init__()
+        # d_token = nn.ValueChoice([64, 128, 192, 256], label="d_token")
+        n_heads = nn.ValueChoice([2, 4, 8, 16, 32], label="n_heads")
+        dim_head = nn.ValueChoice(
+            [8, 16, 32, 64, 128, 192, 256], label="dim_head")
+        dim = nn.ValueChoice([16, 32, 64, 128, 192, 256], label="dim_hidden")
+        depth = nn.ValueChoice(range(1, 10), label="depth")
+        attn_dropout = nn.ValueChoice(
+            [0.1, 0.2, 0.3, 0.4, 0.0, 0.5], label="attn_dropout")
+        ff_dropout = nn.ValueChoice(
+            [0.1, 0.2, 0.3, 0.4, 0.0, 0.5], label="ff_dropout")
+
+        self.transformer = FTTransformer(
+            categories=[],
+            num_continuous=n_features,
+            dim=dim,
+            depth=depth,
+            heads=n_heads,
+            dim_head=dim_head,
+            dim_out=d_out,
+            num_special_tokens=2,
+            attn_dropout=attn_dropout,
+            ff_dropout=ff_dropout)
+
+    def forward(self, x):
+        x = self.transformer(x)
         return x
 
 
