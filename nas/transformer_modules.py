@@ -1,10 +1,10 @@
 import torch
 import torch.nn.functional as F
-from torch import nn, einsum
+from torch import nn  # , einsum
 import nni
-from einops.layers.torch import Rearrange
-from einops._torch_specific import allow_ops_in_compiled_graph  # requires einops>=0.6.1
-allow_ops_in_compiled_graph()
+# from einops.layers.torch import Rearrange
+# from einops._torch_specific import allow_ops_in_compiled_graph  # requires einops>=0.6.1
+# allow_ops_in_compiled_graph()
 # feedforward and attention
 
 
@@ -43,8 +43,8 @@ class Attention(nn.Module):
         self.to_out = nn.Linear(inner_dim, dim, bias=False)
 
         self.dropout = nn.Dropout(dropout)
-        self.rearrange1 = Rearrange('b n (h d) -> b h n d', h=self.heads)
-        self.rearrange2 = Rearrange('b h n d -> b n (h d)', h=self.heads)
+        # self.rearrange1 = Rearrange('b n (h d) -> b h n d', h=self.heads)
+        # self.rearrange2 = Rearrange('b h n d -> b n (h d)', h=self.heads)
 
     def forward(self, x):
         h = self.heads
@@ -52,20 +52,40 @@ class Attention(nn.Module):
         x = self.norm(x)
 
         q, k, v = self.to_qkv(x).chunk(3, dim=-1)
-        q = self.rearrange1(q)
-        k = self.rearrange1(k)
-        v = self.rearrange1(v)
+
+        q_ = q
+        b = q.shape[0]
+        n = q.shape[1]
+        d = int(q.shape[2]/h)
+        q = q.view(b, n, h, d).permute(0, 2, 1, 3)
+
+        k_ = k
+        b = k.shape[0]
+        n = k.shape[1]
+        d = int(k.shape[2]/h)
+        k = k.view(b, n, h, d).permute(0, 2, 1, 3)
+
+        b = v.shape[0]
+        n = v.shape[1]
+        d = int(v.shape[2]/h)
+        v = v.view(b, n, h, d).permute(0, 2, 1, 3)
         # q, k, v = map(lambda t: self.rearrange1(
         #     t), (q, k, v))
         q = q * self.scale
 
-        sim = einsum('b h i d, b h j d -> b h i j', q, k)
+        # einsum('b h i d, b h j d -> b h i j', q, k)
+        sim = torch.matmul(q, k.transpose(-1, -2))
 
         attn = sim.softmax(dim=-1)
         dropped_attn = self.dropout(attn)
+        # einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
+        out = torch.matmul(dropped_attn, v)
+        b = out.shape[0]
+        h = out.shape[1]
+        n = out.shape[2]
+        d = out.shape[3]
+        out = out.permute(0, 2, 1, 3).reshape(b, n, h * d)
 
-        out = einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
-        out = self.rearrange2(out)
         out = self.to_out(out)
 
         return out, attn
@@ -124,7 +144,7 @@ class NumericalEmbedder(nn.Module):
 # main class
 
 
-@nni.retiarii.basic_unit
+@ nni.retiarii.basic_unit
 class FTTransformer(nn.Module):
     def __init__(
         self,
