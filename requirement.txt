@@ -1,5 +1,19 @@
-nni==2.7
+colorama
 typeguard==2.13
 torch==1.12
 scikit-learn==0.23.1  ## 1.0.1
 filelock==3.10
+cloudpickle
+json_tricks
+PyYAML
+psutil
+requests
+astor
+schema
+pytorch_lightning==1.9.5
+websockets==1.5.3
+onnxsim
+onnx
+jsonlines
+onnxruntime
+numpy==1.21.6
