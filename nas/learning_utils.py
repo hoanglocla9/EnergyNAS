@@ -270,8 +270,8 @@ def evaluate_model_v2(model_cls, batch_size, lag_range, target, performance_metr
             train_accuracy += acc_fn(output.squeeze().cpu(),
                                      tensor_y.squeeze().cpu()).item() * len(tensor_x)
 
-        train_loss = train_loss / len(train_loader.sampler.indices)
-        train_accuracy = train_accuracy / len(train_loader.sampler.indices)
+        train_loss = train_loss / len(train_loader.sampler)
+        train_accuracy = train_accuracy / len(train_loader.sampler)
 
         with torch.no_grad():
             valid_loss = 0
@@ -285,9 +285,9 @@ def evaluate_model_v2(model_cls, batch_size, lag_range, target, performance_metr
                 valid_accuracy += acc_fn(output.squeeze().cpu(),
                                          tensor_y.squeeze().cpu()).item() * len(tensor_x)
 
-            valid_loss = valid_loss / len(valid_loader.sampler.indices)
+            valid_loss = valid_loss / len(valid_loader.sampler)
             valid_accuracy = valid_accuracy / \
-                len(valid_loader.sampler.indices)
+                len(valid_loader.sampler)
             min_loss_list.append(valid_loss)
             min_acc_list.append(valid_accuracy)
 
