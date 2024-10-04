@@ -1,7 +1,9 @@
 import nni.retiarii.strategy as strategy
 from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-from nas.learning_utils import  get_regressor
-from nas.model import MLPSpace, ResNetSpace, FTTransformerSpace, ConventionalTransformerSpace, FTTransformerSpace_OneShot
+from nas.learning_utils import  evaluate_model, load_random_oneshot_strategy
+
+from nni.retiarii.evaluator import FunctionalEvaluator
+from nas.model import  FTTransformerSpace_OneShot
 
 import logging, json
 import argparse
@@ -52,9 +54,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     cfg = vars(args)
 
-
+    assert cfg['strategy'] in ['random', 'reinforce', 'evolution'], f"Search One Shot Subnets does not support {cfg['strategy']} strategy"
     # assert cfg['mode'] == 'multi' and cfg['strategy'] not in ["darts", "random_oneshot"], \
     #                 f"Not support the combination of '{cfg['mode']}' mode and '{cfg['strategy']}' strategy yet!!!"
+    assert os.path.exists(cfg['checkpoint']), "Checkpoint path need to be provided and exist"
+    assert cfg['backbone_model'] in ['fttransformer'], "Currently, we only support FTTransformer Supernet"
     
     e_metric_folder_name = "power" if cfg['efficiency_metric'] == "energy" else cfg['efficiency_metric']
     assert os.path.exists(
@@ -66,34 +70,22 @@ if __name__ == "__main__":
         n_features = cfg['n_features']
 
     thresholds = {cfg['efficiency_metric']: 5, cfg['performance_metric']: 0.3}
-    mutation_hooks = []
-    if cfg['backbone_model'] == 'mlp':
-        model_space = MLPSpace(n_features=n_features)
-    elif cfg['backbone_model'] == 'resnet':
-        model_space = ResNetSpace(n_features=n_features)
-    elif cfg['backbone_model'] == 'fttransformer':
-        # , batch_size=cfg['batch_size']
-        if cfg["strategy"] not in ["random_oneshot", 'darts']:
-            model_space = FTTransformerSpace(n_features=n_features)
-        else:
-            model_space = FTTransformerSpace_OneShot(n_features=n_features)
-            mutation_hooks = FTTransformerSpace_OneShot.get_extra_mutation_hooks()
-    elif cfg['backbone_model'] == 'transformer':
-        model_space = ConventionalTransformerSpace(
-            n_features=n_features)
-    else:
-        raise Exception('Not support this backbone model yet!')
-
-    evaluator = get_regressor(lag_range=cfg['lag_range'],
+    reloaded_model_space = FTTransformerSpace_OneShot(n_features=n_features)
+    mutation_hooks = FTTransformerSpace_OneShot.get_extra_mutation_hooks()
+    previous_oneshot_strategy = load_random_oneshot_strategy(reloaded_model_space, cfg['checkpoint'], mutation_hooks)
+    
+    model_space = FTTransformerSpace_OneShot(n_features=n_features)
+    evaluator = FunctionalEvaluator(evaluate_model,
+                                    previous_oneshot_strategy=previous_oneshot_strategy,
+                                    strategy=cfg['strategy'],
+                                    lag_range=cfg['lag_range'],
                                     target=cfg['target'],
                                     performance_metric=cfg['performance_metric'],
                                     efficiency_metric=cfg['efficiency_metric'],
                                     mode=cfg['mode'],
+                                    max_epochs=cfg['max_epoches'],
                                     target_values=thresholds, 
-                                    batch_size=cfg['batch_size'],
-                                    max_epochs=cfg['max_epoches'], 
-                                    fast_dev_run=False,
-                                    strategy=cfg["strategy"])
+                                    batch_size=cfg['batch_size'])
 
     if cfg["strategy"] == "random":
         search_strategy = strategy.Random(
@@ -118,17 +110,12 @@ if __name__ == "__main__":
         else:
             search_strategy = strategy.PolicyBasedRL(
                 max_collect=cfg["trial_number"]//2, trial_per_collect=2)
-    elif cfg["strategy"] == "darts":
-        search_strategy = strategy.DARTS(mutation_hooks=mutation_hooks)
-    elif cfg["strategy"] == "random_oneshot":
-        assert (cfg['backbone_model'] == 'fttransformer' and cfg["strategy"] == "random_oneshot")  , "Only support Random One Shot with FTTransformer!!!"
-        search_strategy = strategy.RandomOneShot(mutation_hooks=mutation_hooks)
+   
 
     exp = RetiariiExperiment(model_space, evaluator, [], search_strategy)
     exp_config = RetiariiExeConfig('local')
     exp_config.experiment_name = 'mnist_search'
-    exp_config.execution_engine = 'base' if cfg["strategy"] not in ["darts", "random_oneshot"] else 'oneshot'
-    # spawn 4 trials at most
+    exp_config.execution_engine = 'base' 
     exp_config.max_trial_number = cfg["trial_number"]
     exp_config.experiment_working_directory = "./nni-experiments/"
     if cfg["n_gpus"] > 0:
@@ -154,7 +141,7 @@ if __name__ == "__main__":
             trimmed_target = "ch4"
         else:
             trimmed_target = "h2o"
-        folder_path = 'results/{}_{}_{}-{}_{}_{}'.format(
+        folder_path = 'results/search_for_onehot_{}_{}_{}-{}_{}_{}'.format(
             cfg["strategy"], trimmed_target, cfg['performance_metric'], cfg['efficiency_metric'], cfg["trial_number"], cfg['backbone_model'])
     
         if not os.path.exists(folder_path):
@@ -169,8 +156,5 @@ if __name__ == "__main__":
             with open(file_path, 'w') as f:
                 f.write(model_code)
     
-    import torch
-    ckp = torch.load("./lightning_logs/version_2/checkpoints/epoch=4-step=60.ckpt", weights_only=True)
-    # print(search_strategy.model.load_state_dict())
-    
+
     print("Done!!!")

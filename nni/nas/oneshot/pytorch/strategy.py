@@ -48,7 +48,7 @@ class OneShotStrategy(BaseStrategy):
         """
         return train_dataloaders, val_dataloaders
 
-    def attach_model(self, base_model: Union[Model, nn.Module]):
+    def attach_model(self, base_model: Union[Model, nn.Module], task="classification"):
         _reason = 'The reason might be that you have used the wrong execution engine. Try to set engine to `oneshot` and try again.'
 
         if isinstance(base_model, Model):
@@ -63,8 +63,12 @@ class OneShotStrategy(BaseStrategy):
             evaluator_module.set_model(py_model)
         else:
             # FIXME: this should be an evaluator + model
-            from nni.retiarii.evaluator.pytorch.lightning import ClassificationModule
-            evaluator_module = ClassificationModule()
+            if task == "classification":
+                from nni.retiarii.evaluator.pytorch.lightning import ClassificationModule
+                evaluator_module = ClassificationModule()
+            else:
+                from nni.retiarii.evaluator.pytorch.lightning import RegressionModule
+                evaluator_module = RegressionModule()
             evaluator_module.running_mode = 'oneshot'
             evaluator_module.set_model(base_model)
         self.model = self.oneshot_module(
@@ -93,7 +97,7 @@ class OneShotStrategy(BaseStrategy):
         assert isinstance(self.model, BaseOneShotLightningModule)
         evaluator.trainer.fit(self.model, train_loader, val_loader)
 
-    def export_top_models(self, top_k: int = 1) -> list[Any]:
+    def export_top_models(self, optimize_mode:str="minimize", formatter: str = "dict", top_k: int = 1) -> list[Any]:
         """The behavior of export top models in strategy depends on the implementation of inner one-shot module."""
         if self.model is None:
             raise RuntimeError(
@@ -101,6 +105,13 @@ class OneShotStrategy(BaseStrategy):
         if top_k != 1:
             warnings.warn(
                 'One-shot strategy currently only supports exporting top-1 model.', RuntimeWarning)
+            
+        if optimize_mode != "minimize":
+            warnings.warn(
+                'One-shot strategy currently only supports exporting with \'minimize\' mode.', RuntimeWarning)
+        if formatter != "dict":
+            warnings.warn(
+                'One-shot strategy currently only supports exporting with \'dict\' format.', RuntimeWarning)
         return [self.model.export()]
 
 

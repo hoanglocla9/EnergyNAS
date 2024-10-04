@@ -14,7 +14,9 @@ from nni.nas.evaluator.pytorch import Lightning, Trainer, DataLoader
 from .darts import DartsRegressionModule
 from nni.nas.evaluator.pytorch.lightning import Regression
 import torch
-
+from nni.retiarii.utils import original_state_dict_hooks
+from nni.nas.fixed import no_fixed_arch
+from nni.retiarii.strategy import RandomOneShot           
 
 @nni.trace
 def latency_reward_component(latency, target_latency):
@@ -50,9 +52,44 @@ def reward_function_v2(accuracy, energy, target_accuracy):
     return -1.0 * energy * accuracy_component
 
 
+def load_random_oneshot_strategy(model_space, checkpoint, mutation_hooks):
+    strategy = RandomOneShot(mutation_hooks=mutation_hooks)
+    strategy.attach_model(model_space, task="regression")
+    strategy.model.load_state_dict(torch.load(checkpoint, weights_only=True)['state_dict'])
+    return strategy
+
+# @nni.trace
+def get_subnet_state_dict(previous_oneshot_strategy):
+        # Load a strategy from checkpoint, same as above
+    arch_dict = nni.get_current_parameter()['mutation_summary']
+    return previous_oneshot_strategy.sub_state_dict(arch_dict)
+            
+def load_state_dict_to_subnet(model, state_dict):
+    reformatted_state_dict = {}
+    for k, v in state_dict.items():
+        last_e_in_k = k.split(".")[-1]
+        e_of_new_k = []
+        len_of_k = len(k.split("."))
+        for idx, e in enumerate(k.split(".")[:-1]):
+            try:
+                if idx < len_of_k-2:
+                    int(e)
+                    e_of_new_k.append("_blocks__" + e)
+                else:
+                    e_of_new_k.append("_" + e)
+            except:
+                e_of_new_k.append("_" + e)
+        new_k = ".".join(e_of_new_k) + "." + last_e_in_k
+        reformatted_state_dict[new_k] = v
+    model.load_state_dict(reformatted_state_dict, strict=False)
+    
+    return model
 
 @nni.trace
-def evaluate_model(model_cls, batch_size, lag_range, target, max_epochs, performance_metric, efficiency_metric, target_values, strategy="random", mode="single", target_device="myriadvpu_openvino2019r2"):
+def evaluate_model(model_cls, batch_size, lag_range, target, max_epochs, 
+                   performance_metric, efficiency_metric, target_values, 
+                   previous_oneshot_strategy=None, strategy="random", 
+                   mode="single", target_device="myriadvpu_openvino2019r2"):
     """
         target_device: the target device name. We support two platforms, namely myriadvpu_openvino2019r2, jetsonnano_jetpack46.
         mode: mode for NAS problem, we support single and multi-objective mode. Filter mode is suitable for contraint single objective problem.
@@ -62,8 +99,12 @@ def evaluate_model(model_cls, batch_size, lag_range, target, max_epochs, perform
     """
     final_metrics = {"default": [], performance_metric: []}
     hardware_metrics = []
-
-    model = model_cls()
+    if previous_oneshot_strategy is not None:
+        model = model_cls() 
+        state_dict = get_subnet_state_dict(previous_oneshot_strategy)
+        model = load_state_dict_to_subnet(model, state_dict)
+    else:
+        model = model_cls()
     if mode == "single":
         estimator = None
     else:
@@ -168,6 +209,17 @@ def evaluate_model(model_cls, batch_size, lag_range, target, max_epochs, perform
     nni.report_final_result(reported_metrics)
 
 
+def load_and_parse_state_dict(filepath):
+    checkpoint = torch.load(filepath, map_location=torch.device("cpu"))
+    if "state_dict" in checkpoint:
+        checkpoint = checkpoint["state_dict"]
+    result = dict()
+    for k, v in checkpoint.items():
+        if k.startswith("module."):
+            k = k[len("module."):]
+        result[k] = v
+    return result
+    
 @nni.trace
 def get_regressor(lag_range, 
                   target, 
