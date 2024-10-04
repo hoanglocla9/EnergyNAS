@@ -1,4 +1,5 @@
 import nni
+import nni.retiarii
 import nni.retiarii.nn.pytorch as nn
 import torch
 import math
@@ -6,13 +7,11 @@ from torch import Tensor
 
 import torch.optim
 import torch.nn.functional as F
-from nni.nas.nn.pytorch import Parameter, GELU
 import typing as ty
 import copy
 import warnings
-from typing import Optional, Any, Union, Callable
-from .transformer_modules import NumericalEmbedder, Attention, FeedForward, CLSToken
-
+from typing import Optional, Union, Callable
+from .transformer import FTTransformerSpace_OneShot, FTTransformerSpace
 
 def get_activation_name_options():
     return [
@@ -768,236 +767,7 @@ class ConventionalTransformerSpace(nn.Module):
         x = x.squeeze(-1)
         return x
 
-
-# @nni.retiarii.model_wrapper
-# class SimpleFTTransformerSpace(nn.Module):
-#     def __init__(self, n_features,  d_out=1):
-#         super().__init__()
-#         # d_token = nn.ValueChoice([64, 128, 192, 256], label="d_token")
-#         n_heads = nn.ValueChoice([2, 4, 8, 16, 32], label="n_heads")
-#         dim_head = nn.ValueChoice(
-#             [8, 16, 32, 64, 128, 192, 256], label="dim_head")
-#         dim = nn.ValueChoice([16, 32, 64, 128, 192, 256], label="dim_hidden")
-#         depth = nn.ValueChoice(range(1, 10), label="depth")
-#         attn_dropout = nn.ValueChoice(
-#             [0.1, 0.2, 0.3, 0.4, 0.0, 0.5], label="attn_dropout")
-#         ff_dropout = nn.ValueChoice(
-#             [0.1, 0.2, 0.3, 0.4, 0.0, 0.5], label="ff_dropout")
-
-#         self.transformer = FTTransformer(
-#             categories=[],
-#             num_continuous=n_features,
-#             dim=dim,
-#             depth=depth,
-#             heads=n_heads,
-#             dim_head=dim_head,
-#             dim_out=d_out,
-#             num_special_tokens=2,
-#             attn_dropout=attn_dropout,
-#             ff_dropout=ff_dropout)
-
-#     def forward(self, x):
-#         x = self.transformer(x)
-#         return x
-
-
-
     
-@nni.retiarii.model_wrapper
-class FTTransformerSpace_OneHot(nn.Module):
-    class TransformerBlock(nn.Module):
-        def __init__(self, index, dim_hidden):
-            super().__init__()
-            # dim_hidden = nn.ValueChoice([8, 16, 32, 64, 128, 192, 256], label=f"dim_hidden_{index}")
-            n_heads = nn.ValueChoice([4, 8, 16, 32], label=f"n_heads_{index}")
-            dim_head = nn.ValueChoice([8, 16, 32, 64, 128, 192, 256], label=f"dim_head_{index}")
-            attn_dropout = nn.ValueChoice([0.0, 0.1, 0.2, 0.3, 0.4, 0.5], label=f"attn_dropout_{index}")
-            ff_dropout = nn.ValueChoice([0.0, 0.1, 0.2, 0.3, 0.4, 0.5], label=f"ff_dropout_{index}")
-            d_ffn_factor = nn.ValueChoice([1, 1.5, 2, 2.5, 3, 3.5, 4], label=f"d_ffn_factor_{index}")
-            
-            self.norm0 = nn.LayerNorm(dim_hidden)
-            self.attention = Attention(dim_hidden, heads=n_heads, dim_head=dim_head,
-                            dropout=attn_dropout)
-            # print(d_ffn_factor)
-            self.ff = FeedForward(dim_hidden, mult=d_ffn_factor, dropout=ff_dropout)
-            # self.residual_dropout = nn.Dropout(p=residual_dropout)
-            self.norm1 = nn.LayerNorm(dim_hidden)
-            
-            
-        def forward(self, x):
-            x = self.norm0(x)
-            attn_out = self.attention(x)
-            x = attn_out + x
-            x = self.ff(x) + x
-            x = self.norm1(x)
-            
-            return x
-    
-    class TransformerStage(nn.Module):
-        def __init__(self, dim_hidden):
-            super().__init__()
-            self.blocks = nn.Repeat(lambda idx: FTTransformerSpace.TransformerBlock(index=idx, dim_hidden=dim_hidden), 
-                                        (1, 8), label="n_blocks")
-
-        def forward(self, x):
-            x = self.blocks(x)
-            return x
-    
-        
-    def __init__(
-        self,
-        n_features
-        
-    ):
-        super().__init__()
-        num_continuous = n_features
-        dim_out=1
-        dim_hidden = nn.ValueChoice([8, 16, 32, 64, 128, 192, 256], label=f"dim_hidden")
-
-        self.numerical_embedder = NumericalEmbedder(dim_hidden, num_continuous)
-
-        # cls token
-
-        self.cls_token = CLSToken(dim_hidden, 'kaiming_normal')
-
-        # transformer
-
-        self.transformer = FTTransformerSpace.TransformerStage(dim_hidden)
-
-        # to logits
-
-        self.to_logits = nn.Sequential(
-            nn.LayerNorm(dim_hidden),
-            nn.ReLU(),
-            nn.Linear(dim_hidden, dim_out)
-        )
-
-    def forward(self, x_numer):  # , return_attn=False
-
-        xs = []
-        # add numerically embedded tokens
-        x = self.numerical_embedder(x_numer)
-        # xs.append(x_numer)
-
-        # x = torch.cat(xs, dim=1)
-
-        # append cls tokens
-        # b = x.shape[0]
-        cls_tokens = self.cls_token(x)
-        x = torch.cat((cls_tokens, x), dim=1)
-
-        # attend
-
-        x = self.transformer(x)
-
-        # get cls token
-        x = x[:, 0]
-
-        # out in the paper is linear(relu(ln(cls)))
-
-        logits = self.to_logits(x)
-
-        return logits 
-    
-    
-
-
-    
-@nni.retiarii.model_wrapper
-class FTTransformerSpace(nn.Module):
-    class TransformerBlock(nn.Module):
-        def __init__(self, index, dim_hidden):
-            super().__init__()
-            # dim_hidden = nn.ValueChoice([8, 16, 32, 64, 128, 192, 256], label=f"dim_hidden_{index}")
-            n_heads = nn.ValueChoice([4, 8, 16, 32], label=f"n_heads_{index}")
-            dim_head = nn.ValueChoice([8, 16, 32, 64, 128, 192, 256], label=f"dim_head_{index}")
-            attn_dropout = nn.ValueChoice([0.0, 0.1, 0.2, 0.3, 0.4, 0.5], label=f"attn_dropout_{index}")
-            ff_dropout = nn.ValueChoice([0.0, 0.1, 0.2, 0.3, 0.4, 0.5], label=f"ff_dropout_{index}")
-            d_ffn_factor = nn.ValueChoice([1, 1.5, 2, 2.5, 3, 3.5, 4], label=f"d_ffn_factor_{index}")
-            
-            self.norm0 = nn.LayerNorm(dim_hidden)
-            self.attention = Attention(dim_hidden, heads=n_heads, dim_head=dim_head,
-                            dropout=attn_dropout)
-            # print(d_ffn_factor)
-            self.ff = FeedForward(dim_hidden, mult=d_ffn_factor, dropout=ff_dropout)
-            # self.residual_dropout = nn.Dropout(p=residual_dropout)
-            self.norm1 = nn.LayerNorm(dim_hidden)
-            
-            
-        def forward(self, x):
-            x = self.norm0(x)
-            attn_out = self.attention(x)
-            x = attn_out + x
-            x = self.ff(x) + x
-            x = self.norm1(x)
-            
-            return x
-    
-    class TransformerStage(nn.Module):
-        def __init__(self, dim_hidden):
-            super().__init__()
-            self.blocks = nn.Repeat(lambda idx: FTTransformerSpace.TransformerBlock(index=idx, dim_hidden=dim_hidden), 
-                                        (1, 8), label="n_blocks")
-
-        def forward(self, x):
-            x = self.blocks(x)
-            return x
-    
-        
-    def __init__(
-        self,
-        n_features
-        
-    ):
-        super().__init__()
-        num_continuous = n_features
-        dim_out=1
-        dim_hidden = nn.ValueChoice([8, 16, 32, 64, 128, 192, 256], label=f"dim_hidden")
-
-        self.numerical_embedder = NumericalEmbedder(dim_hidden, num_continuous)
-
-        # cls token
-
-        self.cls_token = CLSToken(dim_hidden, 'kaiming_normal')
-
-        # transformer
-
-        self.transformer = FTTransformerSpace.TransformerStage(dim_hidden)
-
-        # to logits
-
-        self.to_logits = nn.Sequential(
-            nn.LayerNorm(dim_hidden),
-            nn.ReLU(),
-            nn.Linear(dim_hidden, dim_out)
-        )
-
-    def forward(self, x_numer):  # , return_attn=False
-
-        xs = []
-        # add numerically embedded tokens
-        x = self.numerical_embedder(x_numer)
-        # xs.append(x_numer)
-
-        # x = torch.cat(xs, dim=1)
-
-        # append cls tokens
-        # b = x.shape[0]
-        cls_tokens = self.cls_token(x)
-        x = torch.cat((cls_tokens, x), dim=1)
-
-        # attend
-
-        x = self.transformer(x)
-
-        # get cls token
-        x = x[:, 0]
-
-        # out in the paper is linear(relu(ln(cls)))
-
-        logits = self.to_logits(x)
-
-        return logits 
     
 
 
@@ -1005,3 +775,4 @@ def reset_weights(m):
     for layer in m.children():
         if hasattr(layer, 'reset_parameters'):
             layer.reset_parameters()
+

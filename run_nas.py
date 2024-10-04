@@ -1,9 +1,7 @@
 import nni.retiarii.strategy as strategy
-from nni.retiarii.evaluator import FunctionalEvaluator
 from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-from nas.learning_utils import evaluate_model, evaluate_model_darts, evaluate_model_v2
-from nas.estimator import HardwareMetricFilter
-from nas.model import MLPSpace, ResNetSpace, FTTransformerSpace, ConventionalTransformerSpace
+from nas.learning_utils import  get_regressor
+from nas.model import MLPSpace, ResNetSpace, FTTransformerSpace, ConventionalTransformerSpace, FTTransformerSpace_OneShot
 
 import logging
 import argparse
@@ -36,19 +34,25 @@ if __name__ == "__main__":
     parser.add_argument("-em", "--efficiency_metric", type=str,
                         help="The Efficiency Metric. We support 2 metrics: energy, and latency", default="energy")
     parser.add_argument("-m", "--mode", type=str,
-                        help="Constraint or MOO mode. We support three modes, namely debug, moo_v1, moo_v2 and filter. \
-                        Debug means that we run NAS with accuracy only. MMO mean that NAS with energy and \
-                        accuracy. Filter meaning that we apply a filter for the energy", default="debug")
+                        help="Constraint or MOO mode. We support three modes, namely single and multi. \
+                        Single means that we run NAS with accuracy only. Multi mean that NAS with energy (latency) and \
+                        accuracy.", default="single")
     parser.add_argument("-th", "--target_hardware", type=str,
                         help="Target hardware. We support 2 platforms: myriadvpu_openvino2019r2 and jetsonnano_jetpack46", default="myriadvpu_openvino2019r2")
     parser.add_argument("-bm", "--backbone_model", type=str,
                         help="The base model of NAS. We support 3 backbone models: mlp, resnet, and fttransformer", default="mlp")
-    parser.add_argument("-bs", "--batch_size", type=str,
+    parser.add_argument("-bs", "--batch_size", type=int,
                         help="Batch Size", default=32)
+    parser.add_argument("-mep", "--max_epoches", type=int,
+                        help="Maximum Epoches", default=20)
 
     args = parser.parse_args()
     cfg = vars(args)
 
+
+    # assert cfg['mode'] == 'multi' and cfg['strategy'] not in ["darts", "random_oneshot"], \
+    #                 f"Not support the combination of '{cfg['mode']}' mode and '{cfg['strategy']}' strategy yet!!!"
+    
     e_metric_folder_name = "power" if cfg['efficiency_metric'] == "energy" else cfg['efficiency_metric']
     assert os.path.exists(
         f"./predictors/{cfg['target_hardware']}/{e_metric_folder_name}/")
@@ -59,43 +63,51 @@ if __name__ == "__main__":
         n_features = cfg['n_features']
 
     thresholds = {cfg['efficiency_metric']: 5, cfg['performance_metric']: 0.3}
-
+    mutation_hooks = []
     if cfg['backbone_model'] == 'mlp':
         model_space = MLPSpace(n_features=n_features)
     elif cfg['backbone_model'] == 'resnet':
         model_space = ResNetSpace(n_features=n_features)
     elif cfg['backbone_model'] == 'fttransformer':
         # , batch_size=cfg['batch_size']
-        model_space = FTTransformerSpace(n_features=n_features)
+        if cfg["strategy"] not in ["random_oneshot", 'darts']:
+            model_space = FTTransformerSpace(n_features=n_features)
+        else:
+            model_space = FTTransformerSpace_OneShot(n_features=n_features)
+            mutation_hooks = FTTransformerSpace_OneShot.get_extra_mutation_hooks()
     elif cfg['backbone_model'] == 'transformer':
         model_space = ConventionalTransformerSpace(
             n_features=n_features)
     else:
         raise Exception('Not support this backbone model yet!')
 
-    evaluator = FunctionalEvaluator(evaluate_model_v2, lag_range=cfg['lag_range'],
+    evaluator = get_regressor(lag_range=cfg['lag_range'],
                                     target=cfg['target'],
                                     performance_metric=cfg['performance_metric'],
                                     efficiency_metric=cfg['efficiency_metric'],
                                     mode=cfg['mode'],
-                                    target_values=thresholds, batch_size=cfg['batch_size'])
-
-    if cfg['mode'] == "filter":
-        model_filter = HardwareMetricFilter(
-            thresholds, applied_hardware=cfg['target_hardware'], reverse=False)
-    else:
-        model_filter = None
+                                    target_values=thresholds, 
+                                    batch_size=cfg['batch_size'],
+                                    max_epochs=cfg['max_epoches'], 
+                                    fast_dev_run=False,
+                                    strategy=cfg["strategy"])
 
     if cfg["strategy"] == "random":
         search_strategy = strategy.Random(
-            dedup=True, model_filter=model_filter)
+            dedup=True)
     elif cfg["strategy"] == "evolution":
-        search_strategy = strategy.RegularizedEvolution(optimize_mode="maximize",
+        if cfg['mode'] == 'single':
+            search_strategy = strategy.RegularizedEvolution(optimize_mode="maximize",
                                                         sample_size=cfg["trial_number"]//8,
                                                         population_size=cfg["trial_number"]//2,
-                                                        cycles=cfg["trial_number"],
-                                                        model_filter=model_filter
+                                                        cycles=cfg["trial_number"]
                                                         )
+        elif cfg['mode'] == 'multi':
+            search_strategy = strategy.MultiObjectiveRegularizedEvolution(
+                sample_size=cfg["trial_number"]//8,
+                population_size=cfg["trial_number"]//2,
+                cycles=cfg["trial_number"]
+            )
     elif cfg["strategy"] == "reinforce":
         if cfg["trial_number"] >= 20:
             search_strategy = strategy.PolicyBasedRL(
@@ -104,25 +116,15 @@ if __name__ == "__main__":
             search_strategy = strategy.PolicyBasedRL(
                 max_collect=cfg["trial_number"]//2, trial_per_collect=2)
     elif cfg["strategy"] == "darts":
-        search_strategy = strategy.DARTS()
-        evaluator = evaluate_model_darts(
-            lag_range=cfg['lag_range'], target=cfg['target'], n_gpus=cfg['n_gpus'],
-            max_epochs=50, fast_dev_run=False)
-
-    elif cfg["strategy"] == "moo_evolution":
-        search_strategy = strategy.MultiObjectiveRegularizedEvolution(
-            sample_size=cfg["trial_number"]//8,
-            population_size=cfg["trial_number"]//2,
-            cycles=cfg["trial_number"],
-            model_filter=model_filter
-        )
-    assert (cfg['mode'] == 'moo_v2' and cfg["strategy"] == "moo_evolution") or \
-        (cfg["mode"] != "moo_v2" and cfg["strategy"] != "moo_evolution")
+        search_strategy = strategy.DARTS(mutation_hooks=mutation_hooks)
+    elif cfg["strategy"] == "random_oneshot":
+        assert (cfg['backbone_model'] == 'fttransformer' and cfg["strategy"] == "random_oneshot")  , "Only support Random One Shot with FTTransformer!!!"
+        search_strategy = strategy.RandomOneShot(mutation_hooks=mutation_hooks)
 
     exp = RetiariiExperiment(model_space, evaluator, [], search_strategy)
     exp_config = RetiariiExeConfig('local')
     exp_config.experiment_name = 'mnist_search'
-    exp_config.execution_engine = 'base' if cfg["strategy"] != "darts" else 'oneshot'
+    exp_config.execution_engine = 'base' if cfg["strategy"] not in ["darts", "random_oneshot"] else 'oneshot'
     # spawn 4 trials at most
     exp_config.max_trial_number = cfg["trial_number"]
     exp_config.experiment_working_directory = "./nni-experiments/"

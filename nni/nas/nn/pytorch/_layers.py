@@ -4,7 +4,7 @@
 # When pytorch version does not match, it will get automatically updated.
 # pylint: skip-file
 # pyright: reportGeneralTypeIssues=false
-# _torch_version = 2.4.0+cu121
+# _torch_version = 2.4.1+cu121
 # _torch_nn_cache_version = 3
 import typing
 import torch.nn as nn
