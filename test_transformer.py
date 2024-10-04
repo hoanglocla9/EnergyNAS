@@ -1,419 +1,171 @@
+import nni.retiarii.strategy as strategy
+from nni.retiarii.evaluator import FunctionalEvaluator
+from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
+from nas.learning_utils import evaluate_model, evaluate_model_darts, evaluate_model_v2
+from nas.estimator import HardwareMetricFilter
+from nas.model import MLPSpace, ResNetSpace, FTTransformerSpace, ConventionalTransformerSpace
 
-import math
-import random
-import typing as ty
-
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from pytest import mark
-from torch import Tensor
-
-
-def set_seeds(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-
-
-def correct_reglu(x: Tensor) -> Tensor:
-    a, b = x.chunk(2, dim=-1)
-    return a * F.relu(b)
-
-
-class CorrectTokenizer(nn.Module):
-    def __init__(
-        self,
-        d_numerical: int,
-        d_token: int,
-        bias: bool,
-    ) -> None:
-        super().__init__()
-        d_bias = d_numerical
-
-        # take [CLS] token into account
-        self.weight = nn.Parameter(Tensor(d_numerical + 1, d_token))
-        self.bias = nn.Parameter(Tensor(d_bias, d_token)) if bias else None
-        # The initialization is inspired by nn.Linear
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            nn.init.kaiming_uniform_(self.bias, a=math.sqrt(5))
-
-    @property
-    def n_tokens(self) -> int:
-        return len(self.weight)
-
-    def forward(self, x_num: Tensor) -> Tensor:
-        x = self.weight[:-1][None] * x_num[:, :, None]
-        x = torch.cat(
-            [x, self.weight[-1][None, None].repeat(len(x), 1, 1)],
-            dim=1,
-        )
-        if self.bias is not None:
-            bias = torch.cat(
-                [
-                    self.bias,
-                    torch.zeros(
-                        1, self.bias.shape[1], device=x_num.device),
-                ]
-            )
-            x = x + bias[None]
-        return x
-
-
-class CorrectMultiheadAttention(nn.Module):
-    def __init__(
-        self, d: int, n_heads: int, dropout: float, initialization: str
-    ) -> None:
-        if n_heads > 1:
-            assert d % n_heads == 0
-        assert initialization in ['xavier', 'kaiming']
-
-        super().__init__()
-        self.W_q = nn.Linear(d, d)
-        self.W_k = nn.Linear(d, d)
-        self.W_v = nn.Linear(d, d)
-        self.W_out = nn.Linear(d, d) if n_heads > 1 else None
-        self.n_heads = n_heads
-        self.dropout = nn.Dropout(dropout) if dropout else None
-
-        for m in [self.W_q, self.W_k, self.W_v]:
-            if initialization == 'xavier' and (n_heads > 1 or m is not self.W_v):
-                # gain is needed since W_qkv is represented with 3 separate layers
-                nn.init.xavier_uniform_(m.weight, gain=1 / math.sqrt(2))
-            nn.init.zeros_(m.bias)
-        if self.W_out is not None:
-            nn.init.zeros_(self.W_out.bias)
-
-    def _reshape(self, x: Tensor) -> Tensor:
-        batch_size, n_tokens, d = x.shape
-        d_head = d // self.n_heads
-        return (
-            x.reshape(batch_size, n_tokens, self.n_heads, d_head)
-            .transpose(1, 2)
-            .reshape(batch_size * self.n_heads, n_tokens, d_head)
-        )
-
-    def forward(
-        self,
-        x_q: Tensor,
-        x_kv: Tensor,
-        key_compression: ty.Optional[nn.Linear],
-        value_compression: ty.Optional[nn.Linear],
-    ) -> Tensor:
-        q, k, v = self.W_q(x_q), self.W_k(x_kv), self.W_v(x_kv)
-        for tensor in [q, k, v]:
-            assert tensor.shape[-1] % self.n_heads == 0
-        if key_compression is not None:
-            assert value_compression is not None
-            k = key_compression(k.transpose(1, 2)).transpose(1, 2)
-            v = value_compression(v.transpose(1, 2)).transpose(1, 2)
-        else:
-            assert value_compression is None
-
-        batch_size = len(q)
-        d_head_key = k.shape[-1] // self.n_heads
-        d_head_value = v.shape[-1] // self.n_heads
-        n_q_tokens = q.shape[1]
-
-        q = self._reshape(q)
-        k = self._reshape(k)
-        attention = F.softmax(q @ k.transpose(1, 2) /
-                              math.sqrt(d_head_key), dim=-1)
-        if self.dropout is not None:
-            attention = self.dropout(attention)
-        x = attention @ self._reshape(v)
-        x = (
-            x.reshape(batch_size, self.n_heads, n_q_tokens, d_head_value)
-            .transpose(1, 2)
-            .reshape(batch_size, n_q_tokens, self.n_heads * d_head_value)
-        )
-        if self.W_out is not None:
-            x = self.W_out(x)
-        return x
-
-
-# class TestedTokenizer(nn.Module):
-#     category_offsets: ty.Optional[Tensor]
-
-#     def __init__(
-#         self,
-#         d_numerical: int,
-#         d_token: int
-#     ) -> None:
-#         super().__init__()
-#         d_bias = d_numerical
-
-#         # take [CLS] token into account
-#         self.weight = nn.Parameter(Tensor(d_numerical + 1, d_token))
-#         self.bias = nn.Parameter(Tensor(d_bias, d_token))
-#         # The initialization is inspired by nn.Linear
-#         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-#         nn.init.kaiming_uniform_(self.bias, a=math.sqrt(5))
-
-#     @property
-#     def n_tokens(self) -> int:
-#         return len(self.weight)
-
-#     def forward(self, x_num: Tensor) -> Tensor:
-#         print(self.weight[:-1][None].shape, x_num[:, :, None].shape)
-#         x = self.weight[:-1][None] * x_num[:, :, None]
-
-#         x = torch.cat(
-#             [x, self.weight[-1][None, None].repeat(len(x), 1, 1)],
-#             dim=1,
-#         )
-#         bias = torch.cat(
-#             [
-#                 self.bias,
-#                 torch.zeros(
-#                     1, self.bias.shape[1], device=x_num.device),
-#             ]
-#         )
-#         x = x + bias[None]
-#         return x
-
-
-# class TestedFTTransformer(nn.Module):
-#     def __init__(self, d_numerical, d_token=192, d_ffn_factor=4/3, n_heads=4, d_out=1):
-#         super().__init__()
-#         self.tokenizer = TestedTokenizer(
-#             d_numerical, d_token
-#         )
-#         # n_tokens = self.tokenizer.n_tokens + 1
-#         d_hidden = int(d_token * d_ffn_factor)
-#         n_layers = 6
-#         layer_dropout_rate = 0.1
-#         activation = 'gelu'
-#         prenormalization = False
-#         encoder_layer = nn.TransformerEncoderLayer(
-#             d_model=d_token, nhead=n_heads, dim_feedforward=d_hidden, dropout=layer_dropout_rate,
-#             activation=activation, norm_first=prenormalization)
-#         self.encoder = nn.TransformerEncoder(
-#             encoder_layer, num_layers=n_layers, norm=nn.LayerNorm(d_token))
-
-#         self.last_activation = F.relu
-#         if prenormalization:
-#             self.last_normalization = nn.LayerNorm(d_token)
-#         else:
-#             self.last_normalization = nn.Identity()
-#         self.head = nn.Linear(d_token, d_out)
-
-#     def forward(self, x):
-#         x = self.tokenizer(x)
-#         x = self.encoder(x)
-#         x = self.last_normalization(x)
-#         x = self.last_activation(x)
-#         x = self.head(x)
-#         x = x.squeeze(-1)
-#         return x
-
-
-class CorrectFTTransformer(nn.Module):
-    def __init__(
-        self,
-        *,
-        # tokenizer
-        d_numerical: int,
-        token_bias: bool,
-        # transformer
-        n_layers: int,
-        d_token: int,
-        n_heads: int,
-        d_ffn_factor: float,
-        attention_dropout: float,
-        ffn_dropout: float,
-        residual_dropout: float,
-        activation: str,
-        prenormalization: bool,
-        initialization: str,
-        # linformer
-        kv_compression: ty.Optional[float],
-        kv_compression_sharing: ty.Optional[str],
-        #
-        d_out: int,
-    ) -> None:
-        assert (kv_compression is None) ^ (
-            kv_compression_sharing is not None)
-
-        super().__init__()
-        self.tokenizer = CorrectTokenizer(
-            d_numerical, d_token, token_bias
-        )
-        n_tokens = self.tokenizer.n_tokens
-
-        def make_kv_compression():
-            assert kv_compression
-            compression = nn.Linear(
-                n_tokens, int(n_tokens * kv_compression), bias=False
-            )
-            if initialization == 'xavier':
-                nn.init.xavier_uniform_(compression.weight)
-            return compression
-
-        self.shared_kv_compression = (
-            make_kv_compression()
-            if kv_compression and kv_compression_sharing == 'layerwise'
-            else None
-        )
-
-        def make_normalization():
-            return nn.LayerNorm(d_token)
-
-        d_hidden = int(d_token * d_ffn_factor)
-        self.layers = nn.ModuleList([])
-        for layer_idx in range(n_layers):
-            layer = nn.ModuleDict(
-                {
-                    'attention': CorrectMultiheadAttention(
-                        d_token, n_heads, attention_dropout, initialization
-                    ),
-                    'linear0': nn.Linear(
-                        d_token, d_hidden *
-                        (2 if activation.endswith('glu') else 1)
-                    ),
-                    'linear1': nn.Linear(d_hidden, d_token),
-                    'norm1': make_normalization(),
-                }
-            )
-            if not prenormalization or layer_idx:
-                layer['norm0'] = make_normalization()
-            if kv_compression and self.shared_kv_compression is None:
-                layer['key_compression'] = make_kv_compression()
-                if kv_compression_sharing == 'headwise':
-                    layer['value_compression'] = make_kv_compression()
-                else:
-                    assert kv_compression_sharing == 'key-value'
-            self.layers.append(layer)
-
-        assert activation == 'reglu'
-        self.activation = correct_reglu
-        self.last_activation = F.relu
-        self.prenormalization = prenormalization
-        self.last_normalization = make_normalization() if prenormalization else None
-        self.ffn_dropout = ffn_dropout
-        self.residual_dropout = residual_dropout
-        self.head = nn.Linear(d_token, d_out)
-
-    def _get_kv_compressions(self, layer):
-        return (
-            (self.shared_kv_compression, self.shared_kv_compression)
-            if self.shared_kv_compression is not None
-            else (layer['key_compression'], layer['value_compression'])
-            if 'key_compression' in layer and 'value_compression' in layer
-            else (layer['key_compression'], layer['key_compression'])
-            if 'key_compression' in layer
-            else (None, None)
-        )
-
-    def _start_residual(self, x, layer, norm_idx):
-        x_residual = x
-        if self.prenormalization:
-            norm_key = f'norm{norm_idx}'
-            if norm_key in layer:
-                x_residual = layer[norm_key](x_residual)
-        return x_residual
-
-    def _end_residual(self, x, x_residual, layer, norm_idx):
-        if self.residual_dropout:
-            x_residual = F.dropout(
-                x_residual, self.residual_dropout, self.training)
-        x = x + x_residual
-        if not self.prenormalization:
-            x = layer[f'norm{norm_idx}'](x)
-        return x
-
-    def forward(self, x_num: Tensor) -> Tensor:
-        x = self.tokenizer(x_num)
-
-        for layer_idx, layer in enumerate(self.layers):
-            is_last_layer = layer_idx + 1 == len(self.layers)
-            layer = ty.cast(ty.Dict[str, nn.Module], layer)
-
-            x_residual = self._start_residual(x, layer, 0)
-            x_residual = layer['attention'](
-                # for the last attention, it is enough to process only [CLS]
-                (x_residual[:, -1:] if is_last_layer else x_residual),
-                x_residual,
-                *self._get_kv_compressions(layer),
-            )
-            if is_last_layer:
-                print("before last", x.shape)
-                x = x[:, -1:]
-
-                print("after last", x.shape)
-            x = self._end_residual(x, x_residual, layer, 0)
-
-            x_residual = self._start_residual(x, layer, 1)
-            x_residual = layer['linear0'](x_residual)
-            x_residual = self.activation(x_residual)
-            if self.ffn_dropout:
-                x_residual = F.dropout(
-                    x_residual, self.ffn_dropout, self.training)
-            x_residual = layer['linear1'](x_residual)
-            x = self._end_residual(x, x_residual, layer, 1)
-
-        assert x.shape[1] == 1
-        x = x[:, 0]
-        if self.last_normalization is not None:
-            x = self.last_normalization(x)
-        x = self.last_activation(x)
-        x = self.head(x)
-        x = x.squeeze(-1)
-        return x
-
+import logging
+import argparse
+import os
+_logger = logging.getLogger(__name__)
+os.environ['PICKLE_SIZE_LIMIT'] = str(10*1024*1024*1024)
 
 if __name__ == "__main__":
-    seed = 123
-    kv_compression_ratio = 0.5
-    default_config = {
-        'seed': 0,
-        'data': {
-            'normalization': 'quantile_normal',
-            'path': 'data/california_housing',
-            'y_policy': 'mean_std',
-        },
-        'model': {
-            'activation': 'reglu',
-            'attention_dropout': 0.2,
-            'd_ffn_factor': 4 / 3,
-            'd_token': 192,
-            'ffn_dropout': 0.1,
-            'initialization': 'kaiming',
-            'n_heads': 8,
-            'n_layers': 3,
-            'prenormalization': True,
-            'residual_dropout': 0.0,
-        },
-        'training': {
-            'batch_size': 256,
-            'eval_batch_size': 8192,
-            'lr': 0.0001,
-            'lr_n_decays': 0,
-            'n_epochs': 1000000000,
-            'optimizer': 'adamw',
-            'patience': 16,
-            'weight_decay': 1e-05,
-        },
-    }
-    dcm = default_config['model']
-    n = 4
-    d_num = 2
-    categories = [2, 3]
-    n_tokens = d_num + len(categories) + 1
-    kv_compression_sharing = 'key-value' if kv_compression_ratio else None
-    d_out = 2
+    parser = argparse.ArgumentParser(
+        description="Just an example", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("-s", "--strategy", type=str,
+                        help="NAS search stragegy, currently, only supported for random, evolution, and reinforce strategies", default="random")
+    parser.add_argument("-r", "--lag_range", type=int,
+                        help="Number of lag features. MISO dataset is a time-series dataset. Therefore, we also use\
+                            some lag features from previos time lags to forecast for a future label. E.g. 26 meaning \
+                            that we use features of the last 26 timesteps", default=26)
+    parser.add_argument("-nf", "--n_features", type=int,
+                        help="Number of features in dataset", default=0)
+    parser.add_argument("-n", "--trial_number", type=int,
+                        help="Maximum number of trial samples", default=20)
+    parser.add_argument("-c", "--n_gpus", type=int,
+                        help="Number of gpus, you want to run NAS", default=0)
+    parser.add_argument("-p", "--port", type=int,
+                        help="NNI WebUI Port. You can go to https://web-IP:port to access NNI WebUI", default=8081)
+    parser.add_argument("-t", "--target", type=str,
+                        help="Training Label Name. This option depends on the dataset. We currently support MISO dataset only. \
+                        There are two targets for MISO dataset, namely ref_ch4(ppm) and ref_h2o(ppm)", default="ref_ch4(ppm)")
+    parser.add_argument("-pm", "--performance_metric", type=str,
+                        help="The Performance Metric. We support 2 metrics: MPAE, and MSE", default="MSE")
+    parser.add_argument("-em", "--efficiency_metric", type=str,
+                        help="The Efficiency Metric. We support 2 metrics: energy, and latency", default="energy")
+    parser.add_argument("-m", "--mode", type=str,
+                        help="Constraint or MOO mode. We support three modes, namely debug, moo_v1, moo_v2 and filter. \
+                        Debug means that we run NAS with accuracy only. MMO mean that NAS with energy and \
+                        accuracy. Filter meaning that we apply a filter for the energy", default="debug")
+    parser.add_argument("-th", "--target_hardware", type=str,
+                        help="Target hardware. We support 2 platforms: myriadvpu_openvino2019r2 and jetsonnano_jetpack46", default="myriadvpu_openvino2019r2")
+    parser.add_argument("-bm", "--backbone_model", type=str,
+                        help="The base model of NAS. We support 3 backbone models: mlp, resnet, and fttransformer", default="mlp")
+    parser.add_argument("-bs", "--batch_size", type=str,
+                        help="Batch Size", default=32)
 
-    set_seeds(seed)
-    model = CorrectFTTransformer(
-        d_numerical=d_num,
-        token_bias=True,
-        kv_compression=kv_compression_ratio,
-        kv_compression_sharing=kv_compression_sharing,
-        d_out=d_out,
-        **dcm,
-    )
-    x_num = torch.randn(n, d_num)
-    x = model(x_num)
-    print(x.shape)
+    args = parser.parse_args()
+    cfg = vars(args)
+
+    e_metric_folder_name = "power" if cfg['efficiency_metric'] == "energy" else cfg['efficiency_metric']
+    assert os.path.exists(
+        f"./predictors/{cfg['target_hardware']}/{e_metric_folder_name}/")
+
+    if cfg['lag_range'] > 0 and cfg['n_features'] == 0:
+        n_features = cfg['lag_range']+7
+    else:
+        n_features = cfg['n_features']
+
+    thresholds = {cfg['efficiency_metric']: 5, cfg['performance_metric']: 0.3}
+
+    if cfg['backbone_model'] == 'mlp':
+        model_space = MLPSpace(n_features=n_features)
+    elif cfg['backbone_model'] == 'resnet':
+        model_space = ResNetSpace(n_features=n_features)
+    elif cfg['backbone_model'] == 'fttransformer':
+        # , batch_size=cfg['batch_size']
+        model_space = FTTransformerSpace(n_features=n_features)
+    elif cfg['backbone_model'] == 'transformer':
+        model_space = ConventionalTransformerSpace(
+            n_features=n_features)
+    else:
+        raise Exception('Not support this backbone model yet!')
+
+    evaluator = FunctionalEvaluator(evaluate_model_v2, lag_range=cfg['lag_range'],
+                                    target=cfg['target'],
+                                    performance_metric=cfg['performance_metric'],
+                                    efficiency_metric=cfg['efficiency_metric'],
+                                    mode=cfg['mode'],
+                                    target_values=thresholds, batch_size=cfg['batch_size'])
+
+    if cfg['mode'] == "filter":
+        model_filter = HardwareMetricFilter(
+            thresholds, applied_hardware=cfg['target_hardware'], reverse=False)
+    else:
+        model_filter = None
+
+    if cfg["strategy"] == "random":
+        search_strategy = strategy.Random(
+            dedup=True, model_filter=model_filter)
+    elif cfg["strategy"] == "evolution":
+        search_strategy = strategy.RegularizedEvolution(optimize_mode="maximize",
+                                                        sample_size=cfg["trial_number"]//8,
+                                                        population_size=cfg["trial_number"]//2,
+                                                        cycles=cfg["trial_number"],
+                                                        model_filter=model_filter
+                                                        )
+    elif cfg["strategy"] == "reinforce":
+        if cfg["trial_number"] >= 20:
+            search_strategy = strategy.PolicyBasedRL(
+                max_collect=cfg["trial_number"]//20, trial_per_collect=20)
+        else:
+            search_strategy = strategy.PolicyBasedRL(
+                max_collect=cfg["trial_number"]//2, trial_per_collect=2)
+    elif cfg["strategy"] == "darts":
+        search_strategy = strategy.DARTS()
+        evaluator = evaluate_model_darts(
+            lag_range=cfg['lag_range'], target=cfg['target'], n_gpus=cfg['n_gpus'],
+            max_epochs=50, fast_dev_run=False)
+
+    elif cfg["strategy"] == "moo_evolution":
+        search_strategy = strategy.MultiObjectiveRegularizedEvolution(
+            sample_size=cfg["trial_number"]//8,
+            population_size=cfg["trial_number"]//2,
+            cycles=cfg["trial_number"],
+            model_filter=model_filter
+        )
+    assert (cfg['mode'] == 'moo_v2' and cfg["strategy"] == "moo_evolution") or \
+        (cfg["mode"] != "moo_v2" and cfg["strategy"] != "moo_evolution")
+
+    exp = RetiariiExperiment(model_space, evaluator, [], search_strategy)
+    exp_config = RetiariiExeConfig('local')
+    exp_config.experiment_name = 'mnist_search'
+    exp_config.execution_engine = 'base' if cfg["strategy"] != "darts" else 'oneshot'
+    # spawn 4 trials at most
+    exp_config.max_trial_number = cfg["trial_number"]
+    exp_config.experiment_working_directory = "./nni-experiments/"
+    if cfg["n_gpus"] > 0:
+        # will run two trials concurrently
+        exp_config.trial_concurrency = cfg["n_gpus"]
+        exp_config.trial_gpu_number = cfg["n_gpus"]
+        exp_config.training_service.use_active_gpu = True
+    else:
+        exp_config.trial_concurrency = 1  # will run two trials concurrently
+        exp_config.trial_gpu_number = 0
+        exp_config.training_service.use_active_gpu = False
+
+    if not os.path.exists("./results"):
+        os.makedirs("./results")
+    if "ch4" in cfg['target']:
+        trimmed_target = "ch4"
+    else:
+        trimmed_target = "h2o"
+    folder_path = 'results/{}_{}_{}-{}_{}_{}'.format(
+        cfg["strategy"], trimmed_target, cfg['performance_metric'], cfg['efficiency_metric'], cfg["trial_number"], cfg['backbone_model'])
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+
+    print("Start running")
+    exp.run(exp_config, port=cfg["port"])
+    print("Done NAS!!!")
+    print("Start to write")
+
+    for idx, model_code in enumerate(exp.export_top_models(top_k=10, formatter="code")):
+        file_path = os.path.join(folder_path, "top_{}.py".format(idx + 1))
+        with open(file_path, 'w') as f:
+            f.write(model_code)
+
+    for idx, model_code in enumerate(exp.export_top_models(top_k=10, optimize_mode="minimize", formatter="code")):
+        file_path = os.path.join(folder_path, "bottom_{}.py".format(idx + 1))
+        with open(file_path, 'w') as f:
+            f.write(model_code)
+
+    # for idx, model_code in enumerate(exp.export_top_models(top_k=1, formatter="dict")):
+    #     print(model_code)
+        # file_path = os.path.join(folder_path, "top_{}_dict.py".format(idx + 1))
+        # with open(file_path, 'w') as f:
+        #     f.write(model_code)
+
+    print("Done!!!")

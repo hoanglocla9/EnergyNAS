@@ -36,7 +36,7 @@ if __name__ == "__main__":
     parser.add_argument("-em", "--efficiency_metric", type=str,
                         help="The Efficiency Metric. We support 2 metrics: energy, and latency", default="energy")
     parser.add_argument("-m", "--mode", type=str,
-                        help="Constraint or MOO mode. We support three modes, namely debug, mmo and filter. \
+                        help="Constraint or MOO mode. We support three modes, namely debug, moo_v1, moo_v2 and filter. \
                         Debug means that we run NAS with accuracy only. MMO mean that NAS with energy and \
                         accuracy. Filter meaning that we apply a filter for the energy", default="debug")
     parser.add_argument("-th", "--target_hardware", type=str,
