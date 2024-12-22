@@ -1,0 +1,44 @@
+Metadata-Version: 2.1
+Name: nni
+Version: 1.0
+Summary: EnergyNAS
+Home-page: https://github.com/enyac-group/Quamba
+Author: Hoang-Loc La
+Author-email: hoang.l.la@uit.no
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: Unix
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+Requires-Dist: torch
+Requires-Dist: colorama
+Requires-Dist: typeguard==2.13
+Requires-Dist: scikit-learn
+Requires-Dist: filelock==3.10
+Requires-Dist: cloudpickle
+Requires-Dist: json_tricks
+Requires-Dist: PyYAML
+Requires-Dist: psutil
+Requires-Dist: requests
+Requires-Dist: astor
+Requires-Dist: schema
+Requires-Dist: pytorch_lightning
+Requires-Dist: websockets
+Requires-Dist: onnxsim
+Requires-Dist: onnx
+Requires-Dist: jsonlines
+Requires-Dist: json_tricks
+Requires-Dist: onnxruntime
+Requires-Dist: numpy
+
+# MISO_NAS
+
+## Installation:
+```console
+conda create -n energy_nas python=3.11
+pip install -r requirement.txt
+```
+## Usage:
+```console
+python run_nas.py --help
+```

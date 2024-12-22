@@ -10,7 +10,7 @@ from pathlib import Path
 nn_cache_file_path = Path(__file__).parent / '_layers.py'
 
 # Update this when cache format changes, to enforce an update.
-cache_version = 3
+cache_version = 4
 
 
 def validate_cache() -> bool:
@@ -39,10 +39,11 @@ def generate_stub_file() -> str:
 
     import torch
     import torch.nn as nn
-
+    import transformers
     _NO_WRAP_CLASSES = [
         # not an nn.Module
         'Parameter',
+        'Buffer',
         'ParameterList',
         'UninitializedBuffer',
         'UninitializedParameter',
@@ -74,12 +75,14 @@ def generate_stub_file() -> str:
         'import typing',
         'import torch.nn as nn',
         'from nni.nas.utils import basic_unit',
+        'from transformers.models.mamba2.modeling_mamba2.py import Mamba2Block',
+        'from nni.nas.nn.extras.llm_layers import MHABlock'
     ]
 
-    all_names = []
-
+    all_names = ['MHABlock', 'Mamba2Block']
     # Add modules, classes, functions in torch.nn into this module.
     for name, obj in inspect.getmembers(torch.nn):
+
         if inspect.isclass(obj):
             if name in _NO_WRAP_CLASSES:
                 code.append(f'{name} = nn.{name}')
@@ -99,6 +102,10 @@ def generate_stub_file() -> str:
             code.append(f'{name} = nn.{name}')  # no modification
             all_names.append(name)
 
+    ### add mamba2 blocks. Need to be automatic...
+    code.append(f'Mamba2Block = typing.cast(typing.Type[Mamba2Block], basic_unit(Mamba2Block))')
+    code.append(f'MHABlock = typing.cast(typing.Type[MHABlock], basic_unit(MHABlock))')
+    
     code.append(f'__all__ = {all_names}')
 
     return '\n'.join(code)
