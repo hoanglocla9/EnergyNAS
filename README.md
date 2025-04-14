@@ -1,5 +1,4 @@
-# MISO_NAS
-This is repository for "Kernel-Level Energy-Efficient Neural Architecture Search for Tabular Dataset" paper. ![link]([https://github.com/user-attachments/assets/3f712f0d-9bb1-42e8-bfd9-b0f5bbf03f24](https://arxiv.org/pdf/2504.08359))
+59))
 
 ## Installation:
 ```console
