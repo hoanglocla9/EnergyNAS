@@ -13,7 +13,7 @@ import os
 import inspect
 import re
 
-from prediction_function import InferencePredictor
+from EnergyNAS.prediction_function import InferencePredictor
 _logger = logging.getLogger(__name__)
 
 
