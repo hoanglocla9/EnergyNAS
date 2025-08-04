@@ -1,6 +1,6 @@
 colorama
 typeguard==2.13
-torch==1.12
+torch
 scikit-learn==0.23.1  ## 1.0.1
 filelock==3.10
 cloudpickle
